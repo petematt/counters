@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>About Counters</title>
+    <meta
+      name="description"
+      content="Learn about Counters, a minimalist app for tracking game scores, tallies, habits, dice rolls, and timers."
+    />
+    <link rel="canonical" href="https://counters.cowneck.com/about.html" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Counters" />
+    <meta property="og:title" content="About Counters" />
+    <meta
+      property="og:description"
+      content="Learn about Counters, a minimalist app for tracking game scores, tallies, habits, dice rolls, and timers."
+    />
+    <meta property="og:url" content="https://counters.cowneck.com/about.html" />
+    <meta property="og:image" content="https://counters.cowneck.com/og-image.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="About Counters" />
+    <meta
+      name="twitter:description"
+      content="Learn about Counters, a minimalist app for tracking game scores, tallies, habits, dice rolls, and timers."
+    />
+    <meta name="twitter:image" content="https://counters.cowneck.com/og-image.jpg" />
+    <style>
+      :root {
+        --card-bg: rgba(30, 41, 59, 0.7);
+        --text-color: #cbd5e1;
+        --heading-color: #f8fafc;
+        --accent-color: #38bdf8;
+        --border-color: rgba(51, 65, 85, 0.5);
+        --max-width: 760px;
+      }
+
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        color: var(--text-color);
+        line-height: 1.6;
+        margin: 0;
+        padding: 2rem 1.5rem;
+        display: flex;
+        justify-content: center;
+        min-height: 100vh;
+        /* Dynamic gradient background */
+        background: linear-gradient(-45deg, #1a1a2e, #0f0f1a, #0f172a, #172554);
+        background-size: 400% 400%;
+        animation: gradientBg 15s ease infinite;
+      }
+
+      @keyframes gradientBg {
+        0% {
+          background-position: 0% 50%;
+        }
+        50% {
+          background-position: 100% 50%;
+        }
+        100% {
+          background-position: 0% 50%;
+        }
+      }
+
+      .container {
+        max-width: var(--max-width);
+        width: 100%;
+        background: var(--card-bg);
+        padding: 3rem;
+        border-radius: 1rem;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(10px);
+        border: 1px solid var(--border-color);
+        box-sizing: border-box;
+      }
+
+      header {
+        margin-bottom: 2.5rem;
+        border-bottom: 1px solid var(--border-color);
+        padding-bottom: 1.5rem;
+      }
+
+      h1 {
+        color: var(--heading-color);
+        font-size: 2.5rem;
+        margin: 0 0 0.5rem 0;
+        font-weight: 800;
+        letter-spacing: -0.025em;
+      }
+
+      .promo {
+        font-size: 1.25rem;
+        color: var(--accent-color);
+        font-weight: 500;
+        margin-top: 1rem;
+      }
+
+      h2 {
+        color: var(--heading-color);
+        font-size: 1.5rem;
+        margin: 2.5rem 0 1rem 0;
+        font-weight: 700;
+        border-bottom: 1px solid var(--border-color);
+        padding-bottom: 0.5rem;
+      }
+
+      a {
+        color: var(--accent-color);
+        text-decoration: none;
+        transition: color 0.2s;
+      }
+
+      a:hover {
+        color: #7dd3fc;
+        text-decoration: underline;
+      }
+
+      ul {
+        padding-left: 1.5rem;
+        margin-bottom: 1.5rem;
+      }
+
+      li {
+        margin-bottom: 0.5rem;
+      }
+
+      footer {
+        margin-top: 3rem;
+        border-top: 1px solid var(--border-color);
+        padding-top: 1.5rem;
+        text-align: center;
+        font-size: 0.875rem;
+        color: rgba(203, 213, 225, 0.6);
+      }
+
+      footer p {
+        margin: 0.5rem 0;
+      }
+
+      footer a {
+        color: rgba(203, 213, 225, 0.6);
+        text-decoration: underline;
+      }
+
+      footer a:hover {
+        color: var(--accent-color);
+      }
+
+      .store-links {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin-top: 2.5rem;
+        margin-bottom: 3rem;
+      }
+
+      .store-btn {
+        display: flex;
+        align-items: center;
+        background: #000;
+        color: #fff;
+        text-decoration: none;
+        border-radius: 12px;
+        padding: 0.5rem 1.25rem;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        transition: transform 0.2s, background 0.2s, box-shadow 0.2s;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+      }
+
+      .store-btn:hover {
+        transform: translateY(-2px);
+        background: #111;
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
+        color: #fff;
+        text-decoration: none;
+      }
+
+      .store-btn svg {
+        width: 26px;
+        height: 26px;
+        margin-right: 0.75rem;
+      }
+
+      .store-btn-text {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .store-btn-small {
+        font-size: 0.65rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        opacity: 0.8;
+      }
+
+      .store-btn-large {
+        font-size: 1.2rem;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        body {
+          animation: none;
+        }
+      }
+
+      @media (max-width: 600px) {
+        .container {
+          padding: 2rem;
+        }
+        h1 {
+          font-size: 2rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>About Counters</h1>
+        <!-- sync-start:promo --><!-- sync-end:promo -->
+      </header>
+
+      <div class="content">
+        <!-- sync-start:description -->
+        <p>
+          Counters is a minimalist app designed for counting things, like scores in games.
+        </p>
+        <p>Features:</p>
+        <ul>
+          <li><strong>Dynamic counters</strong>: Add, edit, delete, and set custom colors for individual counters.</li>
+          <li><strong>Calculator overlay</strong>: Tap a counter to add or subtract custom values or quick-add presets.</li>
+          <li><strong>Dice roller</strong>: Roll dice (d4 to d20) with adjustable quantities.</li>
+          <li><strong>Stopwatch/timer</strong>: Track intervals or count down using quick-add presets.</li>
+          <li><strong>History log</strong>: Record all counter adjustments, resets, and dice rolls.</li>
+          <li><strong>Offline persistence</strong>: Save all app states locally to resume instantly.</li>
+          <li><strong>Shuffle decider</strong>: Randomize counter order to determine play order.</li>
+          <li><strong>Total value</strong>: View the combined sum of all active counters.</li>
+          <li><strong>Counter sorting</strong>: Sort counters automatically by value, or drag and drop to reorder.</li>
+          <li><strong>Device themes</strong>: Support system light and dark modes with customizable color accents.</li>
+        </ul>
+        <!-- sync-end:description -->
+
+        <div class="store-links">
+          <a
+            href="https://apps.apple.com/us/app/counters-minimalist-tracker/id6778014900"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="store-btn"
+          >
+            <svg aria-hidden="true" viewBox="0 0 384 512" fill="currentColor">
+              <path
+                d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"
+              ></path>
+            </svg>
+            <div class="store-btn-text">
+              <span class="store-btn-small">Download on the</span>
+              <span class="store-btn-large">App Store</span>
+            </div>
+          </a>
+          <a
+            href="https://play.google.com/store/apps/details?id=com.cowneck.counters"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="store-btn"
+          >
+            <svg aria-hidden="true" viewBox="0 0 512 512" fill="currentColor">
+              <path
+                d="M325.3 234.3L104.6 13l280.8 161.2-60.1 60.1zM47 0C34 6.8 25.3 19.2 25.3 35.3v441.3c0 16.1 8.7 28.5 21.7 35.3l256.6-256L47 0zm425.2 225.6l-58.9-34.1-65.7 64.5 65.7 64.5 60.1-34.1c18-14.3 18-46.5-1.2-60.8zM104.6 499l280.8-161.2-60.1-60.1L104.6 499z"
+              ></path>
+            </svg>
+            <div class="store-btn-text">
+              <span class="store-btn-small">GET IT ON</span>
+              <span class="store-btn-large">Google Play</span>
+            </div>
+          </a>
+          <a
+            href="/"
+            class="store-btn"
+          >
+            <svg aria-hidden="true" viewBox="0 0 512 512" fill="currentColor">
+              <!-- Globe Icon -->
+              <path
+                d="M352 256c0 22.2-1.2 43.6-3.3 64H163.3c-2.2-20.4-3.3-41.8-3.3-64s1.2-43.6 3.3-64h185.4c2.2 20.4 3.3 41.8 3.3 64zm28.8-64h123.1c5.3 20.5 8.1 41.9 8.1 64s-2.7 43.5-8.1 64H380.8c2.1-20.6 3.2-42 3.2-64s-1.1-43.4-3.2-64zm112.6-32H376.7c-10-63.9-29.8-117.4-55.3-151.6c78.3 20.6 142 77.5 172 151.6zm-149.1 0H167.7c6.1-36.4 15.5-68.6 27-94.7c10.5-23.6 22.2-40.7 33.5-51.5C239.4 3.2 248.7 0 256 0s16.6 3.2 27.8 13.8c11.3 10.8 23 27.9 33.5 51.5c11.6 26 20.9 58.2 27 94.7zm-209 0H18.6C48.6 84.5 112.3 27.6 190.6 7.2C165.1 41.4 145.3 94.9 135.3 152zM8.1 192H131.2c-2.1 20.6-3.2 42-3.2 64s1.1 43.4 3.2 64H8.1C2.7 299.5 0 278.1 0 256s2.7-43.5 8.1-64zM194.7 446.6c-11.6-26-20.9-58.2-27-94.7H344.3c-6.1 36.4-15.5 68.6-27 94.7c-10.5 23.6-22.2 40.7-33.5 51.5C272.6 508.8 263.3 512 256 512s-16.6-3.2-27.8-13.8c-11.3-10.8-23-27.9-33.5-51.5zM135.3 360c10 63.9 29.8 117.4 55.3 151.6C112.3 491.2 48.6 434.3 18.6 360H135.3zm241.4 0h116.7c-30 74.3-93.7 131.2-172 151.6c25.5-34.2 45.3-87.7 55.3-151.6z"
+              ></path>
+            </svg>
+            <div class="store-btn-text">
+              <span class="store-btn-small">Play in your</span>
+              <span class="store-btn-large">Browser</span>
+            </div>
+          </a>
+        </div>
+
+        <p>Contact: <a href="mailto:apps@cowneck.com">apps@cowneck.com</a></p>
+      </div>
+
+      <footer>
+        <p>&copy; 2026 Cowneck. All rights reserved.</p>
+        <p><a href="privacy.html">Privacy policy</a></p>
+      </footer>
+    </div>
+  </body>
+</html>
