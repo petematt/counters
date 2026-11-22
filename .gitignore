@@ -5,6 +5,7 @@ Thumbs.db
 # --- Dependencies & Build Artifacts ---
 node_modules/
 dist/
+dist-preview/
 build/
 vendor/
 .npm-cache/

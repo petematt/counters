@@ -1,0 +1,63 @@
+name: Staging GitHub Pages
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gh-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout staging branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build staging bundle
+        env:
+          PREVIEW_BUILD: '1'
+        run: |
+          npx vite build
+          rm -f dist-preview/CNAME
+
+      - name: Publish staging bundle to gh-pages
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git clone --depth 1 --branch gh-pages "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" /tmp/gh-pages
+          else
+            mkdir -p /tmp/gh-pages
+            git -C /tmp/gh-pages init -b gh-pages
+            git -C /tmp/gh-pages remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          fi
+
+          find /tmp/gh-pages -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+          cp -a dist-preview/. /tmp/gh-pages/
+          rm -f /tmp/gh-pages/CNAME
+          touch /tmp/gh-pages/.nojekyll
+
+          cd /tmp/gh-pages
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Deploy staging (${GITHUB_SHA::7})"
+            git push origin gh-pages
+          fi

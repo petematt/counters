@@ -67,6 +67,8 @@ function getGitInfo(isBuild = false) {
   return { commitHash, isDirty, version };
 }
 
+const isPreview = process.env.PREVIEW_BUILD === '1';
+
 export default defineConfig({
   base: './',
   define: {
@@ -78,7 +80,7 @@ export default defineConfig({
     entries: ['index.html'],
   },
   build: {
-    outDir: 'docs',
+    outDir: isPreview ? 'dist-preview' : 'docs',
     emptyOutDir: true,
     rollupOptions: {
       external: ['firebase/analytics'],
@@ -102,14 +104,26 @@ export default defineConfig({
         },
       },
     },
-    VitePWA({
-      registerType: 'autoUpdate',
-      includeAssets: ['favicon.png', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png'],
-      manifest: manifestData,
-      workbox: {
-        // Precache the bundled Latin font files so text renders offline
-        globPatterns: ['**/*.{js,css,html}', '**/*latin*-wght-normal-*.woff2'],
-      },
-    })
-  ]
+    isPreview
+      ? {
+          name: 'preview-pwa-stub',
+          resolveId(id) {
+            if (id === 'virtual:pwa-register') return '\0virtual:pwa-register';
+          },
+          load(id) {
+            if (id === '\0virtual:pwa-register') {
+              return 'export function registerSW() { return () => {}; }';
+            }
+          },
+        }
+      : VitePWA({
+          registerType: 'autoUpdate',
+          includeAssets: ['favicon.png', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png'],
+          manifest: manifestData,
+          workbox: {
+            // Precache the bundled Latin font files so text renders offline
+            globPatterns: ['**/*.{js,css,html}', '**/*latin*-wght-normal-*.woff2'],
+          },
+        }),
+  ],
 });

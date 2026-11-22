@@ -42,6 +42,7 @@ export default [
   {
     ignores: [
       'docs/',
+      'dist-preview/',
       'node_modules/',
       'ios/',
       'android/',
