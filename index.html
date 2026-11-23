@@ -1,22 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <script>window.__APP_VERSION__ = "0.2.0";
-window.__COMMIT_HASH__ = "0db7528";
+    <script>window.__APP_VERSION__ = "0.3.0";
+window.__COMMIT_HASH__ = "dd66af3";
 window.__IS_DIRTY__ = false;</script>
 
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
 
     <!-- Premium PWA / Native Mobile App Fullscreen Mode -->
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta
-      name="apple-mobile-web-app-status-bar-style"
-      content="black-translucent"
-    />
     <meta name="apple-mobile-web-app-title" content="Counters" />
     <meta name="mobile-web-app-capable" content="yes" />
 
@@ -28,9 +23,7 @@ window.__IS_DIRTY__ = false;</script>
     <!-- iOS Home Screen Icon -->
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
 
-    <!-- Android/PWA Manifest -->
-    <link rel="manifest" href="./manifest.json" />
-    <meta name="theme-color" content="#121212" />
+    <meta name="theme-color" content="#0d0e11" />
     <!-- sync-start:meta-description -->
     <meta
       name="description"
@@ -104,8 +97,8 @@ window.__IS_DIRTY__ = false;</script>
         root.setAttribute("data-layout", savedLayout);
       })();
     </script>
-    <script type="module" crossorigin src="./assets/index-C33-7D1Q.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-CY8j_jmS.css">
+    <script type="module" crossorigin src="./assets/index-CccBopfr.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BpfWPxAJ.css">
   </head>
   <body>
     <!-- Subtle ambient background gradient influenced by the current leader -->
@@ -114,7 +107,7 @@ window.__IS_DIRTY__ = false;</script>
     <!-- App Header -->
     <header class="app-header" data-active-tab="counters">
       <button
-        class="header-left"
+        class="header-left counters-only-control"
         id="header-leader-container"
         aria-label="Display options"
       >
@@ -177,7 +170,7 @@ window.__IS_DIRTY__ = false;</script>
 
       <div class="header-right">
         <button
-          class="header-btn"
+          class="header-btn counters-only-control"
           id="btn-open-history"
           title="History"
           aria-label="Open history"
@@ -196,7 +189,7 @@ window.__IS_DIRTY__ = false;</script>
           </svg>
         </button>
         <button
-          class="header-btn"
+          class="header-btn counters-only-control"
           id="btn-add-counter"
           title="Add counter"
           aria-label="Add counter"
@@ -427,7 +420,7 @@ window.__IS_DIRTY__ = false;</script>
               id="picker-winner-bg"
               aria-hidden="true"
             ></div>
-            <div class="picker-prompt" id="picker-prompt" aria-hidden="true">
+            <div class="picker-prompt" id="picker-prompt">
               <div class="placeholder-icon picker-prompt-icon">
                 <svg
                   aria-hidden="true"
@@ -647,45 +640,8 @@ window.__IS_DIRTY__ = false;</script>
           <!-- Injected dynamically by JavaScript, e.g. +5, +10, +50 -->
         </div>
 
-        <!-- Calculator layout (system number input mode) -->
-        <div class="calculator-wrapper" id="calc-system-container">
-          <!-- Interactive Math Area -->
-          <div class="math-entry-row">
-            <!-- Operation Toggles (+ / -) -->
-            <div class="operation-toggles">
-              <button class="op-btn" id="calc-op-minus" aria-label="Subtract">
-                −
-              </button>
-              <button class="op-btn active" id="calc-op-plus" aria-label="Add">
-                +
-              </button>
-            </div>
-            <!-- Numeric Display Screen -->
-            <div class="math-display-wrapper">
-              <span class="math-op-indicator">+</span>
-              <input
-                type="number"
-                inputmode="decimal"
-                step="any"
-                class="math-number-input"
-                id="calc-number-input"
-                placeholder="0"
-                aria-label="Pending value adjustment"
-              />
-            </div>
-            <!-- Apply Adjustment Button -->
-            <button
-              type="submit"
-              class="primary-btn"
-              id="calc-btn-submit"
-            >
-              Apply
-            </button>
-          </div>
-        </div>
-
         <!-- In-app number pad layout -->
-        <div class="calculator-wrapper" id="calc-numpad-container" hidden>
+        <div class="calculator-wrapper" id="calc-numpad-container">
           <div class="numpad-display-wrapper">
             <div class="numpad-display-value" id="calc-numpad-display" aria-live="polite">0</div>
             <button
@@ -1217,32 +1173,17 @@ window.__IS_DIRTY__ = false;</script>
               </label>
             </div>
 
-            <!-- Use System Number Input Toggle -->
-            <div class="settings-row">
-              <div class="settings-info">
-                <span class="setting-title">Use system number input</span>
-              </div>
-              <label class="switch-toggle">
-                <input
-                  type="checkbox"
-                  id="setting-system-number-input"
-                  aria-label="Use system number input"
-                  checked
-                />
-                <span class="slider-round"></span>
-              </label>
-            </div>
 
             <!-- Quick Add Editing -->
-            <div class="settings-column">
+            <div class="settings-row settings-row-quick-add">
               <div class="settings-info">
                 <span class="setting-title">Quick-add values</span>
-                <span class="setting-desc">Comma-separated</span>
               </div>
               <input
                 type="text"
                 class="settings-input"
                 id="setting-quick-add-values"
+                placeholder="5, 10, 15, 20, 50, 100"
                 aria-label="Quick-add calculator values"
                 aria-describedby="quick-add-feedback"
                 value="5, 10, 15, 20, 50, 100"
@@ -1260,7 +1201,9 @@ window.__IS_DIRTY__ = false;</script>
             <span id="about-app-version">Counters v0.0.3</span>
             <span id="about-app-store-container" class="app-store-container">
               <span class="app-store-separator" aria-hidden="true">&bull;</span>
-              <a id="about-app-store-link" href="https://apps.apple.com/us/app/counters-minimalist-tracker/id6778014900" class="app-store-link" target="_blank" rel="noopener noreferrer">Get the app</a>
+              <a href="https://apps.apple.com/us/app/counters-minimalist-tracker/id6778014900" class="app-store-link" target="_blank" rel="noopener noreferrer">App Store</a>
+              <span class="app-store-separator" aria-hidden="true">&bull;</span>
+              <a href="https://play.google.com/store/apps/details?id=com.cowneck.counters" class="app-store-link" target="_blank" rel="noopener noreferrer">Google Play</a>
             </span>
           </div>
         </div>
