@@ -1059,14 +1059,53 @@ import { log } from "./logger.js";
   // 3. Web Audio Tonal Synthesizer
   // ------------------------------------------------------------------------
   let audioCtx = null;
+  let audioSuspendTimer = null;
+  let activeSustainedVoices = 0;
+
+  const clearAudioSuspend = () => {
+    if (audioSuspendTimer !== null) {
+      clearTimeout(audioSuspendTimer);
+      audioSuspendTimer = null;
+    }
+  };
+
+  const suspendAudioContextNow = () => {
+    clearAudioSuspend();
+    if (
+      audioCtx &&
+      audioCtx.state === "running" &&
+      typeof audioCtx.suspend === "function"
+    ) {
+      audioCtx.suspend().catch(() => {
+        /* ignore */
+      });
+    }
+  };
+
+  const scheduleAudioSuspend = (delayMs = 1500) => {
+    if (activeSustainedVoices > 0) return;
+    clearAudioSuspend();
+    audioSuspendTimer = setTimeout(() => {
+      audioSuspendTimer = null;
+      if (activeSustainedVoices > 0) return;
+      suspendAudioContextNow();
+    }, delayMs);
+  };
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) suspendAudioContextNow();
+  });
 
   const getAudioContext = () => {
+    clearAudioSuspend();
     if (!audioCtx) {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
     // Resume context if suspended (common browser security constraint)
     if (audioCtx.state === "suspended") {
-      audioCtx.resume();
+      audioCtx.resume().catch(() => {
+        /* ignore */
+      });
     }
     return audioCtx;
   };
@@ -1099,6 +1138,7 @@ import { log } from "./logger.js";
 
       osc.start();
       osc.stop(ctx.currentTime + duration);
+      scheduleAudioSuspend(Math.max(1500, Math.ceil(duration * 1000) + 600));
     } catch (e) {
       log.warn("Audio Context failed to play", e);
     }
@@ -1465,11 +1505,14 @@ import { log } from "./logger.js";
       overOsc.connect(overGain);
       overOsc.start(now);
 
+      activeSustainedVoices += 1;
+      clearAudioSuspend();
       let stopped = false;
       return {
         stop(fadeSec = 0.12) {
           if (stopped) return;
           stopped = true;
+          activeSustainedVoices = Math.max(0, activeSustainedVoices - 1);
           try {
             const t = ctx.currentTime;
             voiceGain.gain.cancelScheduledValues(t);
@@ -1482,6 +1525,9 @@ import { log } from "./logger.js";
             overOsc.stop(t + fadeSec + 0.02);
           } catch {
             /* ignore */
+          }
+          if (activeSustainedVoices === 0) {
+            scheduleAudioSuspend(Math.ceil(fadeSec * 1000) + 1200);
           }
         },
       };
@@ -1556,6 +1602,9 @@ import { log } from "./logger.js";
       overGain.connect(dest);
       overOsc.start(startTime);
       overOsc.stop(startTime + duration * 0.65 + 0.02);
+      scheduleAudioSuspend(
+        Math.max(1500, Math.ceil((delay + duration) * 1000) + 600),
+      );
     } catch (e) {
       log.warn("Picker note audio failed", e);
     }
@@ -5241,12 +5290,30 @@ import { log } from "./logger.js";
       eliminationTimers = [];
     };
 
+    let lastSpeedAttrTime = null;
+    let lastSpeedAttrVal = null;
+
+    const writeRotationSpeedAttr = (speed, now, force = false) => {
+      if (
+        force ||
+        lastSpeedAttrTime === null ||
+        now - lastSpeedAttrTime >= 100 ||
+        Math.abs(speed - lastSpeedAttrVal) >= 15
+      ) {
+        stage.dataset.rotationSpeed = speed.toFixed(1);
+        lastSpeedAttrTime = now;
+        lastSpeedAttrVal = speed;
+      }
+    };
+
     const stopRotationLoop = () => {
       if (rotationRaf !== null) {
         cancelAnimationFrame(rotationRaf);
         rotationRaf = null;
       }
       lastRotationTime = null;
+      lastSpeedAttrTime = null;
+      lastSpeedAttrVal = null;
       delete stage.dataset.rotationSpeed;
     };
 
@@ -5274,11 +5341,13 @@ import { log } from "./logger.js";
       lastRotationTime = now;
 
       const speed = getRotationSpeed(now);
-      stage.dataset.rotationSpeed = speed.toFixed(1);
+      writeRotationSpeedAttr(speed, now);
 
       touches.forEach((entry) => {
         entry.angle = (entry.angle + entry.direction * speed * dt) % 360;
-        entry.el.style.setProperty("--rot", `${entry.angle.toFixed(2)}deg`);
+        if (entry.shapeEl) {
+          entry.shapeEl.style.rotate = `${entry.angle.toFixed(1)}deg`;
+        }
       });
 
       rotationRaf = requestAnimationFrame(stepRotation);
@@ -5287,7 +5356,7 @@ import { log } from "./logger.js";
     const startRotationLoop = () => {
       if (prefersReducedMotion()) return;
       const now = performance.now();
-      stage.dataset.rotationSpeed = getRotationSpeed(now).toFixed(1);
+      writeRotationSpeedAttr(getRotationSpeed(now), now, true);
       if (rotationRaf !== null) return;
       lastRotationTime = now;
       rotationRaf = requestAnimationFrame(stepRotation);
@@ -5564,6 +5633,10 @@ import { log } from "./logger.js";
       entry.el.dataset.shape = team.shape.name;
       entry.el.style.setProperty("--circle-color", team.color);
       entry.el.innerHTML = `<svg class="picker-shape" aria-hidden="true" viewBox="0 0 100 100">${team.shape.markup}</svg>`;
+      entry.shapeEl = entry.el.querySelector(".picker-shape");
+      if (entry.shapeEl) {
+        entry.shapeEl.style.rotate = `${entry.angle.toFixed(1)}deg`;
+      }
       entry.el.classList.add("is-team-revealed");
       if (withEffects) {
         spawnShockwave(entry, team.color);
@@ -5783,8 +5856,8 @@ import { log } from "./logger.js";
       el.dataset.shape = shape.name;
       el.dataset.note = String(midi);
       el.style.setProperty("--circle-color", color);
-      el.style.setProperty("--rot", "0deg");
       el.innerHTML = `<svg class="picker-shape" aria-hidden="true" viewBox="0 0 100 100">${shape.markup}</svg>`;
+      const shapeEl = el.querySelector(".picker-shape");
       circlesLayer.appendChild(el);
 
       const direction = nextDirection;
@@ -5803,6 +5876,7 @@ import { log } from "./logger.js";
         angle: 0,
         direction,
         el,
+        shapeEl,
       };
       positionCircle(entry, e.clientX, e.clientY);
       touches.set(e.pointerId, entry);

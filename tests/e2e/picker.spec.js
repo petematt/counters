@@ -350,6 +350,7 @@ test('all 9 Picker shapes stay centered on (50, 50) with stationary drop-shadows
         cy: sy / samples,
         svgFilter: getComputedStyle(svg).filter,
         circleFilter: getComputedStyle(circle).filter,
+        haloBg: getComputedStyle(circle, '::before').backgroundImage,
       };
     }),
   );
@@ -358,7 +359,8 @@ test('all 9 Picker shapes stay centered on (50, 50) with stationary drop-shadows
   for (const m of metrics) {
     expect(Math.hypot(m.cx - 50, m.cy - 50), `${m.shape} centroid drift`).toBeLessThan(0.5);
     expect(m.svgFilter, `${m.shape} rotating svg filter`).toBe('none');
-    expect(m.circleFilter, `${m.shape} stationary wrapper filter`).not.toBe('none');
+    expect(m.circleFilter, `${m.shape} wrapper filter`).toBe('none');
+    expect(m.haloBg, `${m.shape} stationary halo`).toContain('radial-gradient');
   }
 
   await page.clock.runFor(2950);
@@ -697,4 +699,35 @@ test('Picker uses major chords in light mode and minor chords in dark mode', asy
   expect(darkNotes[1] - darkNotes[0]).toBe(3);
   expect(darkNotes[0]).toBeLessThan(lightNotes[0]);
 });
+
+test('Picker auto-suspends AudioContext after going idle', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__suspendCount = 0;
+    const OrigCtx = window.AudioContext || window.webkitAudioContext;
+    if (OrigCtx?.prototype?.suspend) {
+      const origSuspend = OrigCtx.prototype.suspend;
+      OrigCtx.prototype.suspend = function (...args) {
+        window.__suspendCount += 1;
+        return origSuspend.apply(this, args);
+      };
+    }
+  });
+  await page.clock.install({ time: T0 });
+  await page.goto('/');
+  await page.locator('[data-tab-btn="picker"]').click();
+  await expect(page.locator('#picker-stage')).toBeInViewport({ ratio: 0.99 });
+  await page.clock.pauseAt(new Date(T0.getTime() + 60_000));
+
+  await page.evaluate(() => { window.__suspendCount = 0; });
+  await dispatchPointer(page, 'pointerdown', 1, 100, 150);
+  // While finger is held, AudioContext must stay active (not suspended)
+  await page.clock.runFor(2000);
+  expect(await page.evaluate(() => window.__suspendCount)).toBe(0);
+
+  // Lift finger -> after idle grace period (~1.4s), AudioContext suspends automatically
+  await dispatchPointer(page, 'pointerup', 1, 100, 150);
+  await page.clock.runFor(1600);
+  expect(await page.evaluate(() => window.__suspendCount)).toBeGreaterThanOrEqual(1);
+});
+
 
