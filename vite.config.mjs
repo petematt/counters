@@ -75,14 +75,21 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
   optimizeDeps: {
-    // Only scan the app entry; otherwise Vite crawls the built copies under
+    // Only scan the app entries; otherwise Vite crawls the built copies under
     // ios/ and android/ and fails on their externalized imports
-    entries: ['index.html'],
+    entries: ['index.html', 'debug.html', 'dice-demo.html'],
   },
   build: {
     outDir: isPreview ? 'dist-preview' : 'docs',
     emptyOutDir: true,
     rollupOptions: {
+      input: process.env.CAPACITOR_BUILD
+        ? 'index.html'
+        : {
+            main: 'index.html',
+            'debug-workbench': 'debug.html',
+            'dice-demo': 'dice-demo.html',
+          },
       external: ['firebase/analytics'],
     },
   },
@@ -121,8 +128,12 @@ export default defineConfig({
           includeAssets: ['favicon.png', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png'],
           manifest: manifestData,
           workbox: {
-            // Precache the bundled Latin font files so text renders offline
+            // Precache the bundled Latin font files so text renders offline, while
+            // keeping the hidden debug/demo tools out of user caches and bypassing
+            // the SPA index.html navigation fallback for them
             globPatterns: ['**/*.{js,css,html}', '**/*latin*-wght-normal-*.woff2'],
+            globIgnores: ['debug.html', 'assets/debug-workbench*', 'dice-demo.html', 'assets/dice-demo*'],
+            navigateFallbackDenylist: [/^\/debug\.html/, /^\/dice-demo\.html/],
           },
         }),
   ],

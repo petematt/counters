@@ -1,5 +1,26 @@
 # Release notes
 
+## 0.3.5
+
+* **Debug:** Renamed the hidden `palettes.html` workbench to `debug.html` and rebranded it as Debug.
+
+## 0.3.4
+
+* **Palettes:** Added laptop multi-finger Picker controls, a segmented Sound on/off switch, shared app styling and color math, and a service worker bypass so `/palettes.html` loads directly in normal browser tabs.
+
+## 0.3.3
+
+* **Palettes:** Added a hidden `palettes.html` debug lab for previewing candidate and dynamic palettes, Picker instruments, and color-vision contrast against the live app.
+
+## 0.3.2
+
+* **Picker:** Kept held shapes anchored in place when a second finger touches down, only dragging once pulled past a 12px leash.
+
+## 0.3.1
+
+* **Picker:** Added a 2-teams mode toggle in the header that splits players into balanced teams with shared colors and shapes.
+* **Audio:** Added harmonic chord cues to Picker with distinct palette instruments, major chords in light mode, and minor chords in dark mode.
+
 ## 0.3.0
 
 * **Calculator:** Replaced the system keyboard with a built-in number pad featuring separate Add and Subtract actions, a +/− switch for quick-add presets, and full hardware keyboard support.

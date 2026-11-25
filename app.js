@@ -19,9 +19,27 @@ import { Keyboard } from "@capacitor/keyboard";
 import confetti from "canvas-confetti";
 import { FirebaseAnalytics } from "@capacitor-firebase/analytics";
 import { log } from "./logger.js";
+import {
+  PALETTES,
+  PALETTE_INSTRUMENTS as SHIPPED_PALETTE_INSTRUMENTS,
+  COUNTER_PLACEHOLDER_LABELS,
+  hueOf,
+  sortColorsByHue,
+  hslToHex,
+  getReadableTextColor,
+  hexToHsl,
+  getHeaderTextColor,
+  getReadableInk,
+  getInkOnLightTint,
+  getInkOnDarkTint,
+  applyAccentTokens as applySharedAccentTokens,
+} from "./palettes.js";
 
 (function () {
   "use strict";
+
+  const isLabMode =
+    new URLSearchParams(window.location.search).get("lab") === "1";
 
   // Google Analytics Sidecar (Web only)
   if (!Capacitor.isNativePlatform()) {
@@ -306,180 +324,14 @@ import { log } from "./logger.js";
     activeCounterIdForEdit: null,
     calcPendingOperation: "plus", // 'plus' or 'minus'
     calcNumpadValue: "",
+    calcQuickSign: "plus", // sign of the quick-add presets: 'plus' or 'minus'
     calcOpenedByKeyboard: false,
     autoSortTimeout: null,
   };
 
-  // Pre-configured counter palette color swatches
-  // Preset counter palettes. Counters store a slot index (0-7), so switching
-  // palettes recolors existing counters. Every color in a palette must take the
-  // same text color at 4.5:1 so cards never mix black and white text (enforced
-  // in tests/e2e/accessibility.spec.js).
-  const palettes = {
-    bold: {
-      label: "Bold",
-      colors: [
-        "#0a54dd", // Royal blue
-        "#c73511", // Red-orange
-        "#c81876", // Magenta
-        "#7e37f8", // Violet
-        "#5a8012", // Grass green
-        "#a25f11", // Amber
-        "#158186", // Teal
-        "#aa19ce", // Purple
-      ],
-      names: [
-        "Royal blue",
-        "Red-orange",
-        "Magenta",
-        "Violet",
-        "Grass green",
-        "Amber",
-        "Teal",
-        "Purple",
-      ],
-    },
-    pastel: {
-      label: "Pastel",
-      colors: [
-        "#93ddfa", // Sky
-        "#fdc399", // Apricot
-        "#fdb2c8", // Pink
-        "#c1d0fb", // Periwinkle
-        "#b6dfa0", // Leaf green
-        "#e9cf87", // Butter
-        "#86e6d3", // Mint
-        "#d4b3fc", // Lilac
-      ],
-      names: [
-        "Sky",
-        "Apricot",
-        "Pink",
-        "Periwinkle",
-        "Leaf green",
-        "Butter",
-        "Mint",
-        "Lilac",
-      ],
-    },
-    vintage: {
-      label: "Vintage",
-      colors: [
-        "#7da2c9", // Denim
-        "#d48871", // Terracotta
-        "#d99fa7", // Dusty rose
-        "#b1a1d1", // Mauve
-        "#9bb48e", // Sage
-        "#d8b260", // Mustard
-        "#77b1b0", // Dusty teal
-        "#a475af", // Plum
-      ],
-      names: [
-        "Denim",
-        "Terracotta",
-        "Dusty rose",
-        "Mauve",
-        "Sage",
-        "Mustard",
-        "Dusty teal",
-        "Plum",
-      ],
-    },
-    nautical: {
-      label: "Nautical",
-      colors: [
-        "#0f2a5f", // Navy
-        "#8b320b", // Red lead
-        "#730533", // Signal red
-        "#5c6b76", // Storm grey
-        "#294c2a", // Kelp
-        "#72511e", // Brass
-        "#115e5e", // Deep sea
-        "#453065", // Twilight
-      ],
-      names: [
-        "Navy",
-        "Red lead",
-        "Signal red",
-        "Storm grey",
-        "Kelp",
-        "Brass",
-        "Deep sea",
-        "Twilight",
-      ],
-    },
-    vaporwave: {
-      label: "Vaporwave",
-      colors: [
-        "#01cdfe", // Cyan
-        "#fd7f82", // Coral
-        "#ff71ce", // Hot pink
-        "#8c9cfb", // Periwinkle
-        "#fffb96", // Lemon
-        "#fda573", // Sunset orange
-        "#05ffa1", // Mint
-        "#b967ff", // Purple
-      ],
-      names: [
-        "Cyan",
-        "Coral",
-        "Hot pink",
-        "Periwinkle",
-        "Lemon",
-        "Sunset orange",
-        "Mint",
-        "Purple",
-      ],
-    },
-    colorblind: {
-      // Designed to stay distinguishable with deuteranopia, protanopia, and
-      // tritanopia: black text lets lightness vary, which survives color blindness
-      label: "Accessible",
-      colors: [
-        "#85e1f8", // Sky
-        "#c37d31", // Caramel
-        "#f6a696", // Salmon
-        "#94b4f4", // Periwinkle
-        "#bcfbbb", // Mint
-        "#d4db4c", // Citron
-        "#349984", // Teal
-        "#9b72ef", // Violet
-      ],
-      names: [
-        "Sky",
-        "Caramel",
-        "Salmon",
-        "Periwinkle",
-        "Mint",
-        "Citron",
-        "Teal",
-        "Violet",
-      ],
-    },
-  };
-
-  // Slots keep a counter's color family across palettes (slot 0 is bluish in
-  // every palette, and so on), so slot order isn't rainbow order. Pickers show
-  // swatches sorted by hue instead, with near-greys last.
-  const hueOf = (hex) => {
-    const [r, g, b] = [1, 3, 5].map(
-      (i) => parseInt(hex.slice(i, i + 2), 16) / 255,
-    );
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    if (max - min < 0.08) return 999; // near-grey: sort last
-    const d = max - min;
-    const h =
-      max === r
-        ? ((g - b) / d) % 6
-        : max === g
-          ? (b - r) / d + 2
-          : (r - g) / d + 4;
-    return (h * 60 + 360) % 360;
-  };
-
-  const sortColorsByHue = (hexes) =>
-    [...hexes].sort((a, b) => hueOf(a) - hueOf(b));
+  // Shipped palettes live in palettes.js; lab mode may register a temporary candidate
+  const palettes = { ...PALETTES };
+  let activeLabCandidateKey = null;
 
   const getSwatchesInDisplayOrder = () =>
     [...getSwatches()].sort((a, b) => hueOf(a.hex) - hueOf(b.hex));
@@ -495,36 +347,6 @@ import { log } from "./logger.js";
     }));
   };
 
-  // Helper: Convert HSL (0-360, 0-100, 0-100) to #rrggbb
-  const hslToHex = (h, s, l) => {
-    const hue = ((Number(h) % 360) + 360) % 360;
-    const sat = s / 100;
-    const lig = l / 100;
-    const k = (n) => (n + hue / 30) % 12;
-    const a = sat * Math.min(lig, 1 - lig);
-    const f = (n) =>
-      Math.round(
-        255 * (lig - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)))),
-      );
-    return (
-      "#" +
-      [f(0), f(8), f(4)].map((v) => v.toString(16).padStart(2, "0")).join("")
-    );
-  };
-
-  // Helpers: WCAG relative luminance and contrast ratio for #rrggbb colors
-  const relativeLuminance = (hex) => {
-    const channel = (i) => {
-      const c = parseInt(hex.slice(i, i + 2), 16) / 255;
-      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    };
-    return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
-  };
-  const contrastRatio = (a, b) => {
-    const [hi, lo] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
-    return (hi + 0.05) / (lo + 0.05);
-  };
-
   // Helper: Mix a #rrggbb color toward another by t (0-1)
   const mixHex = (hex, toward, t) =>
     "#" +
@@ -535,18 +357,6 @@ import { log } from "./logger.js";
         return Math.round(from + (to - from) * t).toString(16).padStart(2, "0");
       })
       .join("");
-
-  // Helper: Black or white text, whichever contrasts more with a #rrggbb background
-  const getReadableTextColor = (hex) => {
-    if (!/^#[0-9a-f]{6}$/i.test(hex)) return "#ffffff";
-    const whiteContrast = contrastRatio(hex, "#ffffff");
-    // Prefer white whenever it passes WCAG AA (4.5:1). White only gains contrast
-    // under the card header's dark overlay, while black loses it, so a color
-    // where black barely wins on the body could still fail in the header.
-    if (whiteContrast >= 4.5) return "#ffffff";
-    // Otherwise (light custom colors) use pure black, which beats near-black.
-    return whiteContrast >= contrastRatio(hex, "#000000") ? "#ffffff" : "#000000";
-  };
 
   // Dice catalog mapped 1:1 to the 8 slots of the active palette
   const DICE_CATALOG = [
@@ -578,28 +388,6 @@ import { log } from "./logger.js";
       tabDice.style.setProperty(`--die-c-${die.sides}-edge`, edge);
     });
   };
-
-  // Helper: Convert #rrggbb to { h, s, l } (0-360, 0-100, 0-100)
-  const hexToHsl = (hex) => {
-    if (!/^#[0-9a-f]{6}$/i.test(hex)) return { h: 205, s: 82, l: 58 };
-    const [r, g, b] = [1, 3, 5].map(
-      (i) => parseInt(hex.slice(i, i + 2), 16) / 255,
-    );
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    const l = (max + min) / 2;
-    if (max === min) return { h: 0, s: 0, l: l * 100 };
-    const d = max - min;
-    const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    const h =
-      max === r
-        ? ((g - b) / d + (g < b ? 6 : 0)) * 60
-        : max === g
-          ? ((b - r) / d + 2) * 60
-          : ((r - g) / d + 4) * 60;
-    return { h, s: s * 100, l: l * 100 };
-  };
-
   const hexToRgba = (hex, alpha) => {
     const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
@@ -678,184 +466,8 @@ import { log } from "./logger.js";
     }
   };
 
-  // Update --theme-hue plus readable accent tokens across all light and dark
-  // surfaces so text meets WCAG 1.4.3 (4.5:1) and icons/marks meet 1.4.11 (3:1).
   const applyAccentTokens = (hue) => {
-    const root = document.documentElement;
-    root.style.setProperty("--theme-hue", hue);
-    const rawLight = hslToHex(hue, 94, 60);
-    const accDark = hslToHex(hue, 92, 65);
-
-    const hNorm = ((Number(hue) % 360) + 360) % 360;
-
-    // On blues/purples (195°–285°, including default 205°), reach 4.55:1 in light
-    // mode so primary buttons get crisp white text instead of hard-to-read black on blue;
-    // elsewhere gently nudge mid-tones (L >= 44%) when 3.05:1 is within reach so red (0°)
-    // stays bright #f93939 and yellow stays sunny.
-    let accLight = rawLight;
-    if (hNorm >= 195 && hNorm <= 285) {
-      for (let l = 60; l >= 32; l -= 0.5) {
-        const candidate = hslToHex(hue, 94, l);
-        if (
-          contrastRatio(candidate, "#ffffff") >= 4.55 &&
-          contrastRatio(candidate, "#f2f3f7") >= 4.55
-        ) {
-          accLight = candidate;
-          break;
-        }
-      }
-    } else {
-      for (let l = 60; l >= 44; l -= 0.5) {
-        const candidate = hslToHex(hue, 94, l);
-        if (
-          contrastRatio(candidate, "#ffffff") >= 3.05 &&
-          contrastRatio(candidate, "#f2f3f7") >= 3.05
-        ) {
-          accLight = candidate;
-          break;
-        }
-      }
-    }
-
-    // Darkening yellow (42°–86°) at fixed HSL hue turns it swamp olive; smoothly
-    // warm that band toward golden amber so darkened light-mode tokens read as gold.
-    const darkenableHue =
-      hNorm > 42 && hNorm < 86
-        ? hNorm - 17 * 0.5 * (1 - Math.cos((2 * Math.PI * (hNorm - 42)) / (86 - 42)))
-        : hNorm;
-
-    const lightSurfaces = [
-      "#ffffff",
-      "#f2f3f7",
-      "#e9ebee",
-      mixHex("#e9ebee", rawLight, 0.1),
-      mixHex("#ffffff", rawLight, 0.1),
-      mixHex("#e9ebee", accLight, 0.1),
-      mixHex("#ffffff", accLight, 0.1),
-    ];
-    let inkLight = "#000000";
-    for (let l = 60; l >= 0; l -= 0.5) {
-      const candidate = hslToHex(darkenableHue, 94, l);
-      if (lightSurfaces.every((s) => contrastRatio(candidate, s) >= 4.6)) {
-        inkLight = candidate;
-        break;
-      }
-    }
-    const darkSurfaces = [
-      "#0d0e11",
-      "#16171d",
-      "#21232c",
-      mixHex("#21232c", accDark, 0.15),
-      mixHex("#16171d", accDark, 0.15),
-    ];
-    let inkDark = "#ffffff";
-    for (let l = 65; l <= 100; l += 0.5) {
-      const candidate = hslToHex(hue, 92, l);
-      if (darkSurfaces.every((s) => contrastRatio(candidate, s) >= 4.6)) {
-        inkDark = candidate;
-        break;
-      }
-    }
-    let graphicLight = "#000000";
-    for (let l = 60; l >= 0; l -= 0.5) {
-      const candidate = hslToHex(darkenableHue, 94, l);
-      if (
-        ["#ffffff", "#f2f3f7", "#e9ebee"].every(
-          (s) => contrastRatio(candidate, s) >= 3.15,
-        )
-      ) {
-        graphicLight = candidate;
-        break;
-      }
-    }
-    let graphicDark = "#ffffff";
-    for (let l = 65; l <= 100; l += 0.5) {
-      const candidate = hslToHex(hue, 92, l);
-      if (
-        ["#0d0e11", "#16171d", "#21232c"].every(
-          (s) => contrastRatio(candidate, s) >= 3.15,
-        )
-      ) {
-        graphicDark = candidate;
-        break;
-      }
-    }
-
-    const lightFillContrasts =
-      contrastRatio(accLight, "#ffffff") >= 3 &&
-      contrastRatio(accLight, "#f2f3f7") >= 3;
-    const darkFillContrasts =
-      contrastRatio(accDark, "#16171d") >= 3 &&
-      contrastRatio(accDark, "#0d0e11") >= 3;
-
-    let navTextLight = "#000000";
-    for (let l = 60; l >= 0; l -= 0.5) {
-      const candidate = hslToHex(darkenableHue, 94, l);
-      if (contrastRatio(candidate, "#f2f3f7") >= 4.55) {
-        navTextLight = candidate;
-        break;
-      }
-    }
-    let navTextDark = "#ffffff";
-    for (let l = 65; l <= 100; l += 0.5) {
-      const candidate = hslToHex(hue, 92, l);
-      if (contrastRatio(candidate, "#0d0e11") >= 4.55) {
-        navTextDark = candidate;
-        break;
-      }
-    }
-
-    root.style.setProperty("--accent-fill-light", accLight);
-    root.style.setProperty("--accent-ink-light", inkLight);
-    root.style.setProperty("--accent-ink-dark", inkDark);
-    root.style.setProperty("--accent-graphic-light", graphicLight);
-    root.style.setProperty("--accent-graphic-dark", graphicDark);
-    root.style.setProperty(
-      "--accent-large-text-light",
-      contrastRatio(accLight, "#ffffff") >= 3 ? accLight : graphicLight,
-    );
-    root.style.setProperty(
-      "--accent-large-text-dark",
-      contrastRatio(accDark, "#16171d") >= 3 ? accDark : graphicDark,
-    );
-    root.style.setProperty(
-      "--accent-nav-icon-light",
-      contrastRatio(accLight, "#f2f3f7") >= 3 ? accLight : graphicLight,
-    );
-    root.style.setProperty(
-      "--accent-nav-icon-dark",
-      contrastRatio(accDark, "#0d0e11") >= 3 ? accDark : graphicDark,
-    );
-    root.style.setProperty("--accent-nav-text-light", navTextLight);
-    root.style.setProperty("--accent-nav-text-dark", navTextDark);
-    root.style.setProperty(
-      "--accent-badge-rim-light",
-      lightFillContrasts ? "none" : graphicLight,
-    );
-    root.style.setProperty(
-      "--accent-badge-rim-dark",
-      darkFillContrasts ? "none" : graphicDark,
-    );
-    root.style.setProperty(
-      "--accent-badge-radius-light",
-      lightFillContrasts ? "11.25px" : "10.75px",
-    );
-    root.style.setProperty(
-      "--accent-badge-radius-dark",
-      darkFillContrasts ? "11.25px" : "10.75px",
-    );
-    root.style.setProperty(
-      "--accent-badge-mark-light",
-      contrastRatio(accLight, "#ffffff") >= 3 ? "#ffffff" : "#000000",
-    );
-    root.style.setProperty(
-      "--accent-fill-border-light",
-      lightFillContrasts
-        ? "transparent"
-        : `color-mix(in srgb, ${graphicLight} 45%, transparent)`,
-    );
-    root.style.setProperty("--accent-on-fill-light", getReadableTextColor(accLight));
-    root.style.setProperty("--accent-on-fill-dark", getReadableTextColor(accDark));
+    applySharedAccentTokens(hue);
     if (ambientInitialized && currentAmbientLeaderHex === null) {
       updateAmbientBackdrop(null, { immediate: true });
     }
@@ -894,6 +506,13 @@ import { log } from "./logger.js";
   // 2. Local Storage Synchronizer
   // ------------------------------------------------------------------------
   const loadStateFromStorage = async () => {
+    if (isLabMode) {
+      state.settings.theme = "dark";
+      state.settings.layout = "grid";
+      applyTheme(state.settings.theme);
+      applyAccentTokens(state.settings.themeHue);
+      return;
+    }
     try {
       const savedCounters = (await Preferences.get({ key: "counters-list" }))
         .value;
@@ -951,6 +570,10 @@ import { log } from "./logger.js";
   };
 
   const saveCounters = () => {
+    if (isLabMode) {
+      window.__countersLabOnStateChange?.();
+      return;
+    }
     Preferences.set({
       key: "counters-list",
       // isNew is a transient render flag; persisting it replays the entry animation on next launch
@@ -961,6 +584,10 @@ import { log } from "./logger.js";
   };
 
   const saveSettings = () => {
+    if (isLabMode) {
+      window.__countersLabOnStateChange?.();
+      return;
+    }
     Preferences.set({
       key: "counters-settings",
       value: JSON.stringify(state.settings),
@@ -972,6 +599,7 @@ import { log } from "./logger.js";
   };
 
   const saveHistory = () => {
+    if (isLabMode) return;
     Preferences.set({
       key: "counters-history",
       value: JSON.stringify(state.history),
@@ -1026,45 +654,7 @@ import { log } from "./logger.js";
     return presetSwatch.hex;
   };
 
-  // Helper: Text color for the card label, which sits on the card header's 12%
-  // black overlay. Keeps the card's text color unless that falls below 4.5:1
-  // there, as black can on mid-tones (e.g. #777777); the value below is large
-  // text that only needs 3:1, so it keeps the card color.
-  const getHeaderTextColor = (hex, text) => {
-    if (!/^#[0-9a-f]{6}$/i.test(hex)) return text;
-    const header = mixHex(hex, "#000000", 0.12);
-    if (contrastRatio(header, text) >= 4.5) return text;
-    return contrastRatio(header, "#ffffff") >= contrastRatio(header, "#000000")
-      ? "#ffffff"
-      : "#000000";
-  };
-
-  // Helper: Mix a #rrggbb color toward `toward`, starting at `start`, only as
-  // far as needed to reach 4.5:1 on `surface`
-  const getReadableInk = (hex, surface, toward, start) => {
-    for (let t = start; t < 1; t += 0.05) {
-      const ink = mixHex(hex, toward, t);
-      if (contrastRatio(ink, surface) >= 4.5) return ink;
-    }
-    return toward;
-  };
-
-  // Helper: The counter color as text on a light surface tinted 10% with it
-  // (e.g. the calculator's title pill). Starts at the usual 85% shade and
-  // darkens only as far as needed for 4.5:1, so pale colors stay readable.
-  const getInkOnLightTint = (hex) => {
-    if (!/^#[0-9a-f]{6}$/i.test(hex)) return "#000000";
-    return getReadableInk(hex, mixHex("#ffffff", hex, 0.1), "#000000", 0.15);
-  };
-
-  // Helper: The dark mode counterpart, on the dark sheet surface tinted 15%.
-  // Lightens from `start` (0 keeps the color as is) so dark colors stay readable.
-  const getInkOnDarkTint = (hex, start = 0) => {
-    if (!/^#[0-9a-f]{6}$/i.test(hex)) return "#ffffff";
-    return getReadableInk(hex, mixHex("#16171d", hex, 0.15), "#ffffff", start);
-  };
-
-  // Helper: Theme a bottom sheet with a counter color and readable text on it
+  // Theme a bottom sheet with a counter color and readable text on it
   const setSheetTheme = (dialog, hex) => {
     dialog.style.setProperty("--sheet-theme", hex);
     dialog.style.setProperty("--sheet-text", getReadableTextColor(hex));
@@ -1090,53 +680,14 @@ import { log } from "./logger.js";
   // 3. Web Audio Tonal Synthesizer
   // ------------------------------------------------------------------------
   let audioCtx = null;
-  let audioSuspendTimer = null;
-  let activeSustainedVoices = 0;
-
-  const clearAudioSuspend = () => {
-    if (audioSuspendTimer !== null) {
-      clearTimeout(audioSuspendTimer);
-      audioSuspendTimer = null;
-    }
-  };
-
-  const suspendAudioContextNow = () => {
-    clearAudioSuspend();
-    if (
-      audioCtx &&
-      audioCtx.state === "running" &&
-      typeof audioCtx.suspend === "function"
-    ) {
-      audioCtx.suspend().catch(() => {
-        /* ignore */
-      });
-    }
-  };
-
-  const scheduleAudioSuspend = (delayMs = 1500) => {
-    if (activeSustainedVoices > 0) return;
-    clearAudioSuspend();
-    audioSuspendTimer = setTimeout(() => {
-      audioSuspendTimer = null;
-      if (activeSustainedVoices > 0) return;
-      suspendAudioContextNow();
-    }, delayMs);
-  };
-
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) suspendAudioContextNow();
-  });
 
   const getAudioContext = () => {
-    clearAudioSuspend();
     if (!audioCtx) {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
     // Resume context if suspended (common browser security constraint)
     if (audioCtx.state === "suspended") {
-      audioCtx.resume().catch(() => {
-        /* ignore */
-      });
+      audioCtx.resume();
     }
     return audioCtx;
   };
@@ -1169,7 +720,6 @@ import { log } from "./logger.js";
 
       osc.start();
       osc.stop(ctx.currentTime + duration);
-      scheduleAudioSuspend(Math.max(1500, Math.ceil(duration * 1000) + 600));
     } catch (e) {
       log.warn("Audio Context failed to play", e);
     }
@@ -1243,129 +793,8 @@ import { log } from "./logger.js";
 
   const midiToFreq = (midi) => 440 * Math.pow(2, (midi - 69) / 12);
 
-  // One distinct Web Audio instrument per color palette (zero external audio assets)
-  const PALETTE_INSTRUMENTS = {
-    bold: {
-      id: "marimba",
-      label: "Marimba",
-      fundType: "sine",
-      overType: "triangle",
-      overMult: 4,
-      detuneCents: 0,
-      octaveShift: 0,
-      attack: 0.01,
-      decay: 0.28,
-      peakVol: 0.085,
-      sustainVol: 0.0085,
-      overPeak: 0.28,
-      overSustain: 0.06,
-      overDecay: 0.14,
-      filterHz: 3200,
-      swellFilterHz: 4800,
-      filterQ: 0.8,
-      pop: { startMult: 1.15, endMult: 0.32, dur: 0.11, vol: 0.15 },
-    },
-    pastel: {
-      id: "celesta",
-      label: "Music box",
-      fundType: "sine",
-      overType: "sine",
-      overMult: 3,
-      detuneCents: 0,
-      octaveShift: 12,
-      attack: 0.008,
-      decay: 0.45,
-      peakVol: 0.07,
-      sustainVol: 0.007,
-      overPeak: 0.22,
-      overSustain: 0.08,
-      overDecay: 0.4,
-      filterHz: 5200,
-      swellFilterHz: 7500,
-      filterQ: 0.7,
-      pop: { startMult: 1.35, endMult: 0.55, dur: 0.09, vol: 0.13 },
-    },
-    vintage: {
-      id: "rhodes",
-      label: "Electric piano",
-      fundType: "sine",
-      overType: "sine",
-      overMult: 2,
-      detuneCents: 3,
-      octaveShift: 0,
-      attack: 0.012,
-      decay: 0.38,
-      peakVol: 0.08,
-      sustainVol: 0.008,
-      overPeak: 0.32,
-      overSustain: 0.1,
-      overDecay: 0.26,
-      filterHz: 1800,
-      swellFilterHz: 3400,
-      filterQ: 1.0,
-      pop: { startMult: 0.95, endMult: 0.3, dur: 0.12, vol: 0.15 },
-    },
-    nautical: {
-      id: "brass",
-      label: "Warm brass",
-      fundType: "sawtooth",
-      overType: "triangle",
-      overMult: 1,
-      detuneCents: -4,
-      octaveShift: 0,
-      attack: 0.045,
-      decay: 0.35,
-      peakVol: 0.075,
-      sustainVol: 0.0075,
-      overPeak: 0.45,
-      overSustain: 0.35,
-      overDecay: 0.35,
-      filterHz: 900,
-      swellFilterHz: 3200,
-      filterQ: 1.8,
-      pop: { startMult: 0.85, endMult: 0.24, dur: 0.13, vol: 0.16 },
-    },
-    vaporwave: {
-      id: "synth",
-      label: "Retro synth",
-      fundType: "sawtooth",
-      overType: "sawtooth",
-      overMult: 1,
-      detuneCents: 8,
-      octaveShift: 0,
-      attack: 0.03,
-      decay: 0.36,
-      peakVol: 0.06,
-      sustainVol: 0.006,
-      overPeak: 0.7,
-      overSustain: 0.65,
-      overDecay: 0.36,
-      filterHz: 1400,
-      swellFilterHz: 4600,
-      filterQ: 2.2,
-      pop: { startMult: 1.5, endMult: 0.22, dur: 0.11, vol: 0.14 },
-    },
-    colorblind: {
-      id: "vibraphone",
-      label: "Vibraphone",
-      fundType: "sine",
-      overType: "triangle",
-      overMult: 2,
-      detuneCents: 0,
-      octaveShift: 0,
-      attack: 0.012,
-      decay: 0.35,
-      peakVol: 0.08,
-      sustainVol: 0.008,
-      overPeak: 0.18,
-      overSustain: 0.09,
-      overDecay: 0.35,
-      filterHz: 4200,
-      swellFilterHz: 6000,
-      filterQ: 0.7,
-      pop: { startMult: 1.1, endMult: 0.38, dur: 0.1, vol: 0.15 },
-    },
-  };
+  // Shipped instruments live in palettes.js; lab mode may register a temporary candidate
+  const PALETTE_INSTRUMENTS = { ...SHIPPED_PALETTE_INSTRUMENTS };
 
   const getActivePickerInstrument = () => {
     const base =
@@ -1536,14 +965,11 @@ import { log } from "./logger.js";
       overOsc.connect(overGain);
       overOsc.start(now);
 
-      activeSustainedVoices += 1;
-      clearAudioSuspend();
       let stopped = false;
       return {
         stop(fadeSec = 0.12) {
           if (stopped) return;
           stopped = true;
-          activeSustainedVoices = Math.max(0, activeSustainedVoices - 1);
           try {
             const t = ctx.currentTime;
             voiceGain.gain.cancelScheduledValues(t);
@@ -1556,9 +982,6 @@ import { log } from "./logger.js";
             overOsc.stop(t + fadeSec + 0.02);
           } catch {
             /* ignore */
-          }
-          if (activeSustainedVoices === 0) {
-            scheduleAudioSuspend(Math.ceil(fadeSec * 1000) + 1200);
           }
         },
       };
@@ -1633,9 +1056,6 @@ import { log } from "./logger.js";
       overGain.connect(dest);
       overOsc.start(startTime);
       overOsc.stop(startTime + duration * 0.65 + 0.02);
-      scheduleAudioSuspend(
-        Math.max(1500, Math.ceil((delay + duration) * 1000) + 600),
-      );
     } catch (e) {
       log.warn("Picker note audio failed", e);
     }
@@ -1663,6 +1083,21 @@ import { log } from "./logger.js";
     arpeggio.forEach((midi, idx) => {
       playPickerNote(midi, {
         duration,
+        vol: 0.065,
+        delay: idx * step,
+      });
+    });
+  };
+
+  // Short 3-note triad preview when selecting a palette in Settings (major in light, minor in dark)
+  const playPickerInstrumentPreview = () => {
+    if (!state.settings.soundEnabled) return;
+    const isDark = isPickerDarkMode();
+    const notes = isDark ? [57, 60, 64] : [60, 64, 67];
+    const step = isDark ? 0.065 : 0.055;
+    notes.forEach((midi, idx) => {
+      playPickerNote(midi, {
+        duration: idx === notes.length - 1 ? 0.45 : 0.32,
         vol: 0.065,
         delay: idx * step,
       });
@@ -2779,6 +2214,20 @@ import { log } from "./logger.js";
     }
   };
 
+  // Presets follow the ± toggle; it resets to + each time the sheet opens
+  const updateQuickSignDOM = () => {
+    const minus = state.calcQuickSign === "minus";
+    const toggle = $("#calc-quick-sign");
+    if (toggle) {
+      toggle.setAttribute("aria-pressed", minus ? "true" : "false");
+      toggle.classList.toggle("is-minus", minus);
+    }
+    $$("#calc-quick-add-container button[data-quick-val]").forEach((btn) => {
+      const val = parseFloat(btn.getAttribute("data-quick-val"));
+      btn.textContent = `${minus ? "−" : "+"}${formatNumber(val)}`;
+    });
+  };
+
   const openCalculator = (counterId, { byKeyboard = false } = {}) => {
     const counter = state.counters.find((c) => c.id === counterId);
     const dialog = $("#calculator-dialog");
@@ -2788,6 +2237,8 @@ import { log } from "./logger.js";
     state.calcPendingOperation = "plus";
     state.calcOpenedByKeyboard = byKeyboard;
     state.calcNumpadValue = "";
+    state.calcQuickSign = "plus";
+    updateQuickSignDOM();
 
     const hexColor = getCounterHex(counter);
     const titleEl = $("#calc-dialog-title");
@@ -2796,6 +2247,9 @@ import { log } from "./logger.js";
     updateNumpadDisplayDOM();
     setSheetTheme(dialog, hexColor);
     openDialog(dialog);
+    // Opened from the keyboard, focus stayed on the card behind the sheet, so
+    // typed digits never arrived. Put it on Add: digits still type, Enter adds.
+    if (byKeyboard) $("#calc-numpad-btn-add")?.focus({ preventScroll: true });
     playClickSound(600, 700, 0.08, 0.05);
   };
 
@@ -2829,12 +2283,19 @@ import { log } from "./logger.js";
 
     // Quick-add buttons apply instantly
     $("#calc-quick-add-container").addEventListener("click", (e) => {
+      if (e.target.closest("#calc-quick-sign")) {
+        playHaptic(ImpactStyle.Light);
+        playClickSound();
+        state.calcQuickSign = state.calcQuickSign === "minus" ? "plus" : "minus";
+        updateQuickSignDOM();
+        return;
+      }
       const btn = e.target.closest("button[data-quick-val]");
       if (!btn) return;
       playHaptic(ImpactStyle.Light);
       const amount = parseFloat(btn.getAttribute("data-quick-val") || "0");
       if (amount !== 0) {
-        state.calcPendingOperation = "plus";
+        state.calcPendingOperation = state.calcQuickSign;
         applyToActiveCounter(amount);
       }
     });
@@ -2905,6 +2366,8 @@ import { log } from "./logger.js";
     window.addEventListener("keydown", (e) => {
       if (!dialog.open) return;
       if (e.isComposing) return;
+      // Leave browser and OS shortcuts alone (Ctrl/⌘ + minus zooms out, + C copies)
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       if (/^[0-9]$/.test(e.key)) {
         e.preventDefault();
@@ -2949,6 +2412,12 @@ import { log } from "./logger.js";
         e.preventDefault();
         $("#calc-numpad-btn-subtract")?.click();
       } else if (e.key === "Enter") {
+        // Enter on a focused button (Subtract, C, a quick-add) presses that
+        // button. Enter from outside the sheet is the one that just opened it
+        // from a card, and must not immediately submit and close it.
+        const target = e.target instanceof Element ? e.target : null;
+        if (target?.closest("button")) return;
+        if (target && target !== document.body && !dialog.contains(target)) return;
         e.preventDefault();
         $("#calc-numpad-btn-add")?.click();
       }
@@ -3377,11 +2846,18 @@ import { log } from "./logger.js";
     const container = $("#calc-quick-add-container");
     if (!container) return;
 
-    container.innerHTML = state.settings.quickAddValues
-      .map((val) => {
-        return `<button data-quick-val="${val}">+${formatNumber(val)}</button>`;
-      })
-      .join("");
+    const rows = Math.max(1, Math.ceil(state.settings.quickAddValues.length / 3));
+    container.innerHTML =
+      `<button type="button" class="quick-sign-toggle" id="calc-quick-sign" aria-pressed="false" aria-label="Subtract preset amounts" style="grid-row: span ${rows}">` +
+      `<span class="quick-sign-plus" aria-hidden="true">+</span>` +
+      `<span class="quick-sign-minus" aria-hidden="true">−</span>` +
+      `</button>` +
+      state.settings.quickAddValues
+        .map((val) => {
+          return `<button data-quick-val="${val}">+${formatNumber(val)}</button>`;
+        })
+        .join("");
+    updateQuickSignDOM();
   };
 
   // ------------------------------------------------------------------------
@@ -3778,30 +3254,7 @@ import { log } from "./logger.js";
     const colorId = selectedSwatch.id;
 
     // Pick an unused placeholder label if possible
-    const labelChoices = [
-      "Crane",
-      "Egret",
-      "Finch",
-      "Flicker",
-      "Gull",
-      "Heron",
-      "Jay",
-      "Junco",
-      "Kite",
-      "Lark",
-      "Magpie",
-      "Merlin",
-      "Piper",
-      "Plover",
-      "Puffin",
-      "Robin",
-      "Sparrow",
-      "Starling",
-      "Swift",
-      "Tern",
-      "Vesper",
-      "Wren",
-    ];
+    const labelChoices = COUNTER_PLACEHOLDER_LABELS;
     const usedLabels = state.counters.map((c) => c.label);
     const unusedLabels = labelChoices.filter(
       (label) => !usedLabels.includes(label),
@@ -4049,7 +3502,7 @@ import { log } from "./logger.js";
       renderEditPaletteSwatches();
       renderCountersList();
       applyDicePalette();
-      playClickSound();
+      playPickerInstrumentPreview();
       playSelectionHaptic();
       if (focus) {
         $(`#setting-palette-group [data-palette-opt="${key}"]`)?.focus();
@@ -5600,6 +5053,7 @@ import { log } from "./logger.js";
     // Stay below 60Hz/120Hz wagon-wheel stroboscopic harmonics (e.g. 5x14.4°=72° at 864°/s)
     const ROTATION_MAX_DEG_PER_SEC = 500;
     const ROTATION_SETTLED_DEG_PER_SEC = 24;
+    const PICKER_FOLLOW_SLACK_PX = 12;
     const SWIPE_TRIGGER_PX = 64;
     const SWIPE_FLICK_PX = 36;
     const SWIPE_FLICK_VELOCITY = 0.3; // px/ms
@@ -5677,30 +5131,12 @@ import { log } from "./logger.js";
       eliminationTimers = [];
     };
 
-    let lastSpeedAttrTime = null;
-    let lastSpeedAttrVal = null;
-
-    const writeRotationSpeedAttr = (speed, now, force = false) => {
-      if (
-        force ||
-        lastSpeedAttrTime === null ||
-        now - lastSpeedAttrTime >= 100 ||
-        Math.abs(speed - lastSpeedAttrVal) >= 15
-      ) {
-        stage.dataset.rotationSpeed = speed.toFixed(1);
-        lastSpeedAttrTime = now;
-        lastSpeedAttrVal = speed;
-      }
-    };
-
     const stopRotationLoop = () => {
       if (rotationRaf !== null) {
         cancelAnimationFrame(rotationRaf);
         rotationRaf = null;
       }
       lastRotationTime = null;
-      lastSpeedAttrTime = null;
-      lastSpeedAttrVal = null;
       delete stage.dataset.rotationSpeed;
     };
 
@@ -5728,13 +5164,11 @@ import { log } from "./logger.js";
       lastRotationTime = now;
 
       const speed = getRotationSpeed(now);
-      writeRotationSpeedAttr(speed, now);
+      stage.dataset.rotationSpeed = speed.toFixed(1);
 
       touches.forEach((entry) => {
         entry.angle = (entry.angle + entry.direction * speed * dt) % 360;
-        if (entry.shapeEl) {
-          entry.shapeEl.style.rotate = `${entry.angle.toFixed(1)}deg`;
-        }
+        entry.el.style.setProperty("--rot", `${entry.angle.toFixed(2)}deg`);
       });
 
       rotationRaf = requestAnimationFrame(stepRotation);
@@ -5743,7 +5177,7 @@ import { log } from "./logger.js";
     const startRotationLoop = () => {
       if (prefersReducedMotion()) return;
       const now = performance.now();
-      writeRotationSpeedAttr(getRotationSpeed(now), now, true);
+      stage.dataset.rotationSpeed = getRotationSpeed(now).toFixed(1);
       if (rotationRaf !== null) return;
       lastRotationTime = now;
       rotationRaf = requestAnimationFrame(stepRotation);
@@ -5853,10 +5287,25 @@ import { log } from "./logger.js";
       return { midi, noteSlot };
     };
 
-    const positionCircle = (entry, clientX, clientY) => {
+    const positionCircle = (entry, clientX, clientY, { follow = false } = {}) => {
       const rect = stage.getBoundingClientRect();
-      entry.x = clientX - rect.left;
-      entry.y = clientY - rect.top;
+      const fingerX = clientX - rect.left;
+      const fingerY = clientY - rect.top;
+      if (follow) {
+        // A held finger's reported point wanders a few px, and jumps when another
+        // finger lands. Keep the shape anchored until the finger pulls it past a
+        // short leash, then drag it along so it never snaps.
+        const dx = fingerX - entry.x;
+        const dy = fingerY - entry.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist <= PICKER_FOLLOW_SLACK_PX) return;
+        const pull = (dist - PICKER_FOLLOW_SLACK_PX) / dist;
+        entry.x += dx * pull;
+        entry.y += dy * pull;
+      } else {
+        entry.x = fingerX;
+        entry.y = fingerY;
+      }
       entry.el.style.setProperty("--x", `${entry.x}px`);
       entry.el.style.setProperty("--y", `${entry.y}px`);
     };
@@ -6020,10 +5469,6 @@ import { log } from "./logger.js";
       entry.el.dataset.shape = team.shape.name;
       entry.el.style.setProperty("--circle-color", team.color);
       entry.el.innerHTML = `<svg class="picker-shape" aria-hidden="true" viewBox="0 0 100 100">${team.shape.markup}</svg>`;
-      entry.shapeEl = entry.el.querySelector(".picker-shape");
-      if (entry.shapeEl) {
-        entry.shapeEl.style.rotate = `${entry.angle.toFixed(1)}deg`;
-      }
       entry.el.classList.add("is-team-revealed");
       if (withEffects) {
         spawnShockwave(entry, team.color);
@@ -6215,16 +5660,49 @@ import { log } from "./logger.js";
       return true;
     };
 
+    let nextLabVirtualId = -1;
+    let labDemoTimers = [];
+    const clearLabDemoTimers = () => {
+      labDemoTimers.forEach((t) => clearTimeout(t));
+      labDemoTimers = [];
+    };
+
     const addPickerTouch = (e) => {
       if (state.currentTab !== "picker") return;
       if (e.pointerType === "mouse" && e.button !== 0) return;
-      if (phase === "eliminating" || phase === "selected" || touches.has(e.pointerId)) return;
-      e.stopPropagation();
 
-      try {
-        stage.setPointerCapture(e.pointerId);
-      } catch {
-        /* ignore */
+      // In ?lab=1 mode on a laptop, mouse clicks pin/unpin virtual touch points
+      // so multi-finger Picker rounds can be played with a single mouse/trackpad
+      let pointerId = e.pointerId;
+      const isPinnedLabClick = isLabMode && e.pointerType === "mouse";
+      if (isPinnedLabClick) {
+        clearLabDemoTimers();
+        if (phase === "selected") {
+          resetPicker();
+          return;
+        }
+        if (phase === "eliminating") return;
+        const rect = stage.getBoundingClientRect();
+        const relX = e.clientX - rect.left;
+        const relY = e.clientY - rect.top;
+        for (const [id, existing] of touches.entries()) {
+          if (id < 0 && Math.hypot(existing.x - relX, existing.y - relY) <= 56) {
+            removePickerTouch({ pointerId: id, type: "pointercancel" });
+            return;
+          }
+        }
+        pointerId = nextLabVirtualId--;
+      }
+
+      if (phase === "eliminating" || phase === "selected" || touches.has(pointerId)) return;
+      e.stopPropagation?.();
+
+      if (pointerId >= 0) {
+        try {
+          stage.setPointerCapture(pointerId);
+        } catch {
+          /* ignore */
+        }
       }
 
       const wasIdle = phase === "idle";
@@ -6238,13 +5716,13 @@ import { log } from "./logger.js";
       const { midi, noteSlot } = allocateNote();
       const el = document.createElement("div");
       el.className = "picker-circle";
-      el.dataset.pointerId = String(e.pointerId);
+      el.dataset.pointerId = String(pointerId);
       el.dataset.color = color;
       el.dataset.shape = shape.name;
       el.dataset.note = String(midi);
       el.style.setProperty("--circle-color", color);
+      el.style.setProperty("--rot", "0deg");
       el.innerHTML = `<svg class="picker-shape" aria-hidden="true" viewBox="0 0 100 100">${shape.markup}</svg>`;
-      const shapeEl = el.querySelector(".picker-shape");
       circlesLayer.appendChild(el);
 
       const direction = nextDirection;
@@ -6263,10 +5741,9 @@ import { log } from "./logger.js";
         angle: 0,
         direction,
         el,
-        shapeEl,
       };
       positionCircle(entry, e.clientX, e.clientY);
-      touches.set(e.pointerId, entry);
+      touches.set(pointerId, entry);
 
       playPickerHaptic("minor");
 
@@ -6276,9 +5753,9 @@ import { log } from "./logger.js";
         schedulePickerSelection();
       } else {
         phase = "waiting";
-        if (wasIdle) {
+        if (wasIdle && !isPinnedLabClick) {
           swipeCandidate = {
-            pointerId: e.pointerId,
+            pointerId,
             startX: e.clientX,
             startY: e.clientY,
             startTime: performance.now(),
@@ -6296,7 +5773,7 @@ import { log } from "./logger.js";
       if (trySingleFingerSwipe(e, false)) return;
       const entry = touches.get(e.pointerId);
       if (!entry) return;
-      positionCircle(entry, e.clientX, e.clientY);
+      positionCircle(entry, e.clientX, e.clientY, { follow: true });
     };
 
     const removePickerTouch = (e) => {
@@ -6360,11 +5837,38 @@ import { log } from "./logger.js";
         resetPicker({ immediate: true });
       }
     });
-    window.addEventListener("blur", () => {
-      if (phase !== "idle") {
+    if (!isLabMode) {
+      window.addEventListener("blur", () => {
+        if (phase !== "idle") {
+          resetPicker({ immediate: true });
+        }
+      });
+    }
+    if (isLabMode) {
+      stage.__simulateLabFingers = (count = 5) => {
+        clearLabDemoTimers();
         resetPicker({ immediate: true });
-      }
-    });
+        const rect = stage.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const rx = Math.max(70, Math.min(rect.width * 0.3, 130));
+        const ry = Math.max(80, Math.min(rect.height * 0.3, 165));
+        const total = Math.max(2, Math.min(8, count));
+        for (let i = 0; i < total; i++) {
+          const angle = -Math.PI / 2 + (i * 2 * Math.PI) / total;
+          const tId = setTimeout(() => {
+            addPickerTouch({
+              pointerId: nextLabVirtualId--,
+              pointerType: "touch",
+              button: 0,
+              clientX: Math.round(cx + Math.cos(angle) * rx),
+              clientY: Math.round(cy + Math.sin(angle) * ry),
+            });
+          }, i * 130);
+          labDemoTimers.push(tId);
+        }
+      };
+    }
     updatePrompt();
   };
 
@@ -6447,20 +5951,116 @@ import { log } from "./logger.js";
     });
 
     // Web: another tab changed saved state. Reload it, otherwise our stale copy
-    // overwrites theirs on the next save. (Never fires on native.)
-    window.addEventListener("storage", async (e) => {
-      if (e.key !== null && !/counters-(list|settings|history)$/.test(e.key)) {
-        return;
-      }
-      await loadStateFromStorage();
-      document.documentElement.setAttribute("data-layout", state.settings.layout);
-      syncThemeSetting();
-      renderPaletteSetting();
-      renderEditPaletteSwatches();
-      populateCalculatorQuickAdds();
-      renderCountersList();
-      renderHistory();
-    });
+    // overwrites theirs on the next save. (Never fires on native or in lab mode.)
+    if (!isLabMode) {
+      window.addEventListener("storage", async (e) => {
+        if (e.key !== null && !/counters-(list|settings|history)$/.test(e.key)) {
+          return;
+        }
+        await loadStateFromStorage();
+        document.documentElement.setAttribute("data-layout", state.settings.layout);
+        syncThemeSetting();
+        renderPaletteSetting();
+        renderEditPaletteSwatches();
+        populateCalculatorQuickAdds();
+        renderCountersList();
+        renderHistory();
+      });
+    }
+
+    if (isLabMode) {
+      window.__countersLab = {
+        getState: () => state,
+        sync({
+          paletteKey,
+          paletteDef,
+          instrumentDef,
+          counters,
+          layout,
+          theme,
+          themeHue,
+          soundEnabled,
+          previewChime = false,
+        } = {}) {
+          if (
+            activeLabCandidateKey &&
+            !PALETTES[activeLabCandidateKey] &&
+            activeLabCandidateKey !== paletteKey
+          ) {
+            delete palettes[activeLabCandidateKey];
+            delete PALETTE_INSTRUMENTS[activeLabCandidateKey];
+            activeLabCandidateKey = null;
+          }
+          if (paletteKey && paletteDef && !PALETTES[paletteKey]) {
+            palettes[paletteKey] = paletteDef;
+            if (instrumentDef) PALETTE_INSTRUMENTS[paletteKey] = instrumentDef;
+            activeLabCandidateKey = paletteKey;
+          } else if (paletteKey && PALETTES[paletteKey] && instrumentDef) {
+            PALETTE_INSTRUMENTS[paletteKey] = instrumentDef;
+          }
+          if (paletteKey && palettes[paletteKey]) {
+            state.settings.palette = paletteKey;
+          }
+          if (typeof soundEnabled === "boolean") {
+            state.settings.soundEnabled = soundEnabled;
+            const soundCheckbox = $("#setting-sound");
+            if (soundCheckbox) soundCheckbox.checked = soundEnabled;
+          }
+          if (theme && ["dark", "light", "system"].includes(theme)) {
+            state.settings.theme = theme;
+            applyTheme(theme);
+          }
+          if (typeof themeHue === "number") {
+            state.settings.themeHue = themeHue;
+            applyAccentTokens(themeHue);
+            const hueInput = $("#setting-theme-hue");
+            if (hueInput) hueInput.value = String(themeHue);
+          }
+          if (layout && ["grid", "list"].includes(layout)) {
+            state.settings.layout = layout;
+            document.documentElement.setAttribute("data-layout", layout);
+          }
+          if (Array.isArray(counters)) {
+            state.counters = counters.map((c) => ({ ...c }));
+          }
+          syncThemeSetting();
+          renderPaletteSetting();
+          renderEditPaletteSwatches();
+          renderCountersList();
+          if (state.activeCounterIdForCalc && $("#calculator-dialog")?.open) {
+            const c = state.counters.find(
+              (item) => item.id === state.activeCounterIdForCalc,
+            );
+            if (c) setSheetTheme($("#calculator-dialog"), getCounterHex(c));
+          }
+          if (state.activeCounterIdForEdit && $("#edit-counter-dialog")?.open) {
+            const c = state.counters.find(
+              (item) => item.id === state.activeCounterIdForEdit,
+            );
+            if (c) setSheetTheme($("#edit-counter-dialog"), getCounterHex(c));
+          }
+          if (previewChime) {
+            playPickerInstrumentPreview();
+          }
+        },
+        audition(kind) {
+          if (kind === "chime") {
+            playPickerInstrumentPreview();
+          } else if (kind === "chord") {
+            const bank = getPickerChordBank();
+            playPickerResolve(bank[Math.floor(Math.random() * bank.length)]);
+          } else if (kind === "pop") {
+            playPickerPop(64);
+          }
+        },
+        simulatePicker(count = 5) {
+          switchTab("picker");
+          requestAnimationFrame(() => {
+            $("#picker-stage")?.__simulateLabFingers?.(count);
+          });
+        },
+      };
+    }
 
     // Set dynamic version from package.json via Vite define injection
     const appVersion =
@@ -6477,24 +6077,26 @@ import { log } from "./logger.js";
       versionEl.textContent = `Counters v${appVersion}`;
     }
 
-    // Register right away instead of waiting for window load, which a stalled
-    // third-party request (e.g. analytics) can delay indefinitely
-    registerSW({
-      immediate: true,
-      onOfflineReady() {
-        log.info("App ready to work offline");
-      },
-      onRegistered(reg) {
-        if (!reg) return;
-        document.addEventListener("visibilitychange", () => {
-          if (document.visibilityState === "visible") {
-            reg.update().catch(() => {
-              /* ignore when offline */
-            });
-          }
-        });
-      },
-    });
+    if (!isLabMode) {
+      // Register right away instead of waiting for window load, which a stalled
+      // third-party request (e.g. analytics) can delay indefinitely
+      registerSW({
+        immediate: true,
+        onOfflineReady() {
+          log.info("App ready to work offline");
+        },
+        onRegistered(reg) {
+          if (!reg) return;
+          document.addEventListener("visibilitychange", () => {
+            if (document.visibilityState === "visible") {
+              reg.update().catch(() => {
+                /* ignore when offline */
+              });
+            }
+          });
+        },
+      });
+    }
   };
 
   // Bootstrap when DOM ready
