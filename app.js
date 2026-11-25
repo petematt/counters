@@ -1669,21 +1669,6 @@ import { log } from "./logger.js";
     });
   };
 
-  // Short 3-note triad preview when selecting a palette in Settings (major in light, minor in dark)
-  const playPickerInstrumentPreview = () => {
-    if (!state.settings.soundEnabled) return;
-    const isDark = isPickerDarkMode();
-    const notes = isDark ? [57, 60, 64] : [60, 64, 67];
-    const step = isDark ? 0.065 : 0.055;
-    notes.forEach((midi, idx) => {
-      playPickerNote(midi, {
-        duration: idx === notes.length - 1 ? 0.45 : 0.32,
-        vol: 0.065,
-        delay: idx * step,
-      });
-    });
-  };
-
   // Desktop Chrome/Edge expose navigator.vibrate but have no motor, so on the
   // web only offer haptics when the primary pointer is a finger
   const supportsWebVibrate = () =>
@@ -2844,13 +2829,6 @@ import { log } from "./logger.js";
 
     // Quick-add buttons apply instantly
     $("#calc-quick-add-container").addEventListener("click", (e) => {
-      if (e.target.closest("#calc-quick-sign")) {
-        playHaptic(ImpactStyle.Light);
-        playClickSound();
-        state.calcQuickSign = state.calcQuickSign === "minus" ? "plus" : "minus";
-        updateQuickSignDOM();
-        return;
-      }
       const btn = e.target.closest("button[data-quick-val]");
       if (!btn) return;
       playHaptic(ImpactStyle.Light);
@@ -3399,18 +3377,11 @@ import { log } from "./logger.js";
     const container = $("#calc-quick-add-container");
     if (!container) return;
 
-    const rows = Math.max(1, Math.ceil(state.settings.quickAddValues.length / 3));
-    container.innerHTML =
-      `<button type="button" class="quick-sign-toggle" id="calc-quick-sign" aria-pressed="false" aria-label="Subtract preset amounts" style="grid-row: span ${rows}">` +
-      `<span class="quick-sign-plus" aria-hidden="true">+</span>` +
-      `<span class="quick-sign-minus" aria-hidden="true">−</span>` +
-      `</button>` +
-      state.settings.quickAddValues
-        .map((val) => {
-          return `<button data-quick-val="${val}">+${formatNumber(val)}</button>`;
-        })
-        .join("");
-    updateQuickSignDOM();
+    container.innerHTML = state.settings.quickAddValues
+      .map((val) => {
+        return `<button data-quick-val="${val}">+${formatNumber(val)}</button>`;
+      })
+      .join("");
   };
 
   // ------------------------------------------------------------------------
