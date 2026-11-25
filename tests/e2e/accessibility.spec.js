@@ -105,12 +105,14 @@ test.describe('color contrast', () => {
       await seed(page, { counters: [counter('a', 'Alpha', 5)], settings: { theme } });
       await page.goto('/');
       await page.locator('[data-tab-btn="dice"]').click();
+      await page.locator('.dice-tray-btn[data-sides="6"]').click();
       await expect(page.locator('#btn-roll-action')).toBeVisible();
       await page.locator('#btn-roll-action').click();
+      await expect(page.locator('#btn-roll-action')).toBeEnabled();
       await expect(page.locator('#dice-result-card')).toHaveClass(/rolled/);
 
-      const pipVsDie = () =>
-        page.locator('#dice-shake-icon').evaluate((el) => {
+      const minDieFaceContrast = () =>
+        page.locator('#dice-tray').evaluate((tray) => {
           const lum = (css) => {
             const [r, g, b] = css.match(/[\d.]+/g).slice(0, 3).map((v) => {
               const c = Number(v) / 255;
@@ -118,13 +120,15 @@ test.describe('color contrast', () => {
             });
             return 0.2126 * r + 0.7152 * g + 0.0722 * b;
           };
-          const a = lum(getComputedStyle(el.querySelector('.accent-badge-fill')).fill);
-          const b = lum(getComputedStyle(el.querySelector('.accent-badge-pip')).fill);
-          return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+          const ratios = [...tray.querySelectorAll('.dice-tray-btn')].map((btn) => {
+            const a = lum(getComputedStyle(btn.querySelector('.die-facet-base')).fill);
+            const b = lum(getComputedStyle(btn.querySelector('.die-face-text')).fill);
+            return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+          });
+          return Math.min(...ratios);
         });
 
-      const badgeFill = page.locator('#dice-shake-icon .accent-badge-fill');
-      const badgePip = page.locator('#dice-shake-icon .accent-badge-pip').first();
+      expect(await minDieFaceContrast(), `${theme} 3D die face ink contrast`).toBeGreaterThanOrEqual(4.5);
 
       for (const hue of [0, 60, 120, 180, 205, 240, 258, 275, 300]) {
         await page.locator('#setting-theme-hue').evaluate((el, h) => {
@@ -132,20 +136,12 @@ test.describe('color contrast', () => {
           el.dispatchEvent(new Event('input', { bubbles: true }));
           document.getAnimations().forEach((a) => a.finish());
         }, hue);
-        const boundaryProp = (await badgeFill.evaluate((el) => getComputedStyle(el).stroke)) === 'none' ? 'fill' : 'stroke';
         expect(await contrast(page.locator('.nav-item.active')), `${theme} nav icon hue ${hue}`).toBeGreaterThanOrEqual(3);
         expect(await contrast(page.locator('.nav-item.active .nav-text')), `${theme} nav text hue ${hue}`).toBeGreaterThanOrEqual(4.5);
         expect(await contrast(page.locator('#btn-roll-action')), `${theme} primary btn hue ${hue}`).toBeGreaterThanOrEqual(4.5);
+        expect(await contrast(page.locator('.dice-mode-btn.active')), `${theme} active mode btn hue ${hue}`).toBeGreaterThanOrEqual(4.5);
         expect(await contrast(page.locator('#dice-result-card'), 'borderTopColor'), `${theme} rolled border hue ${hue}`).toBeGreaterThanOrEqual(3);
-        expect(await contrast(badgeFill, boundaryProp), `${theme} die boundary hue ${hue}`).toBeGreaterThanOrEqual(3);
-        expect(await pipVsDie(), `${theme} die pips hue ${hue}`).toBeGreaterThanOrEqual(3);
 
-        if (theme === 'light' && [0, 205, 240, 258, 275, 300].includes(hue)) {
-          await expect(badgePip, `white pips hue ${hue}`).toHaveCSS('fill', 'rgb(255, 255, 255)');
-          await expect(badgeFill, `rimless badge hue ${hue}`).toHaveCSS('stroke', 'none');
-          const fillRgb = await badgeFill.evaluate((el) => getComputedStyle(el).fill);
-          await expect(page.locator('.nav-item.active'), `matching nav icon hue ${hue}`).toHaveCSS('color', fillRgb);
-        }
         if (theme === 'light' && [205, 240, 258, 275].includes(hue)) {
           await expect(page.locator('#btn-roll-action'), `white button text hue ${hue}`).toHaveCSS('color', 'rgb(255, 255, 255)');
         }
