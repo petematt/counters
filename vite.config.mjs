@@ -73,14 +73,20 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
   optimizeDeps: {
-    // Only scan the app entry; otherwise Vite crawls the built copies under
+    // Only scan the app entries; otherwise Vite crawls the built copies under
     // ios/ and android/ and fails on their externalized imports
-    entries: ['index.html'],
+    entries: ['index.html', 'debug.html'],
   },
   build: {
     outDir: 'docs',
     emptyOutDir: true,
     rollupOptions: {
+      input: process.env.CAPACITOR_BUILD
+        ? 'index.html'
+        : {
+            main: 'index.html',
+            'debug-workbench': 'debug.html',
+          },
       external: ['firebase/analytics'],
     },
   },
@@ -107,8 +113,12 @@ export default defineConfig({
       includeAssets: ['favicon.png', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png'],
       manifest: manifestData,
       workbox: {
-        // Precache the bundled Latin font files so text renders offline
+        // Precache the bundled Latin font files so text renders offline, while
+        // keeping the hidden debug.html tool out of user caches and bypassing
+        // the SPA index.html navigation fallback for /debug.html
         globPatterns: ['**/*.{js,css,html}', '**/*latin*-wght-normal-*.woff2'],
+        globIgnores: ['debug.html', 'assets/debug-workbench*'],
+        navigateFallbackDenylist: [/^\/debug\.html/],
       },
     })
   ]

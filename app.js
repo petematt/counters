@@ -19,9 +19,27 @@ import { Keyboard } from "@capacitor/keyboard";
 import confetti from "canvas-confetti";
 import { FirebaseAnalytics } from "@capacitor-firebase/analytics";
 import { log } from "./logger.js";
+import {
+  PALETTES,
+  PALETTE_INSTRUMENTS as SHIPPED_PALETTE_INSTRUMENTS,
+  COUNTER_PLACEHOLDER_LABELS,
+  hueOf,
+  sortColorsByHue,
+  hslToHex,
+  getReadableTextColor,
+  hexToHsl,
+  getHeaderTextColor,
+  getReadableInk,
+  getInkOnLightTint,
+  getInkOnDarkTint,
+  applyAccentTokens as applySharedAccentTokens,
+} from "./palettes.js";
 
 (function () {
   "use strict";
+
+  const isLabMode =
+    new URLSearchParams(window.location.search).get("lab") === "1";
 
   // Google Analytics Sidecar (Web only)
   if (!Capacitor.isNativePlatform()) {
@@ -142,6 +160,7 @@ import { log } from "./logger.js";
   //    shrinks (and may scroll), so the sheet is lifted by --vv-bottom.
   // Best effort on the web; desktop never matches (no coarse pointer).
   let fullViewportHeight = 0;
+  let lastKeyboardVisibleHeight = 0;
   let viewportWidth = 0;
   const syncKeyboardState = () => {
     const vv = window.visualViewport;
@@ -175,6 +194,23 @@ import { log } from "./logger.js";
       root.style.removeProperty("--vv-height");
       root.style.removeProperty("--vv-bottom");
     }
+
+    // The sheet shrinks to the space above the keyboard after the field was
+    // focused, so a field low in a scrolling sheet (Settings' quick-add
+    // values) ends up under the keyboard. Bring it back into view once the
+    // new size has applied, and again whenever the visible height changes.
+    if (keyboardOpen && vv.height !== lastKeyboardVisibleHeight) {
+      const field = document.activeElement;
+      if (field?.closest("dialog[open]")) {
+        requestAnimationFrame(() => {
+          if (document.activeElement === field) {
+            field.scrollIntoView({ block: "center" });
+            if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
+          }
+        });
+      }
+    }
+    lastKeyboardVisibleHeight = keyboardOpen ? vv.height : 0;
 
     if (
       root.classList.contains("viewport-locked") &&
@@ -278,6 +314,7 @@ import { log } from "./logger.js";
       themeHue: 205,
       keepAwake: false,
       palette: "bold",
+      diceMode: "exact",
     },
     history: [],
     currentTab: "counters",
@@ -287,180 +324,14 @@ import { log } from "./logger.js";
     activeCounterIdForEdit: null,
     calcPendingOperation: "plus", // 'plus' or 'minus'
     calcNumpadValue: "",
+    calcQuickSign: "plus", // sign of the quick-add presets: 'plus' or 'minus'
     calcOpenedByKeyboard: false,
     autoSortTimeout: null,
   };
 
-  // Pre-configured counter palette color swatches
-  // Preset counter palettes. Counters store a slot index (0-7), so switching
-  // palettes recolors existing counters. Every color in a palette must take the
-  // same text color at 4.5:1 so cards never mix black and white text (enforced
-  // in tests/e2e/accessibility.spec.js).
-  const palettes = {
-    bold: {
-      label: "Bold",
-      colors: [
-        "#0a54dd", // Royal blue
-        "#c73511", // Red-orange
-        "#c81876", // Magenta
-        "#7e37f8", // Violet
-        "#5a8012", // Grass green
-        "#a25f11", // Amber
-        "#158186", // Teal
-        "#aa19ce", // Purple
-      ],
-      names: [
-        "Royal blue",
-        "Red-orange",
-        "Magenta",
-        "Violet",
-        "Grass green",
-        "Amber",
-        "Teal",
-        "Purple",
-      ],
-    },
-    pastel: {
-      label: "Pastel",
-      colors: [
-        "#93ddfa", // Sky
-        "#fdc399", // Apricot
-        "#fdb2c8", // Pink
-        "#c1d0fb", // Periwinkle
-        "#b6dfa0", // Leaf green
-        "#e9cf87", // Butter
-        "#86e6d3", // Mint
-        "#d4b3fc", // Lilac
-      ],
-      names: [
-        "Sky",
-        "Apricot",
-        "Pink",
-        "Periwinkle",
-        "Leaf green",
-        "Butter",
-        "Mint",
-        "Lilac",
-      ],
-    },
-    vintage: {
-      label: "Vintage",
-      colors: [
-        "#7da2c9", // Denim
-        "#d48871", // Terracotta
-        "#d99fa7", // Dusty rose
-        "#b1a1d1", // Mauve
-        "#9bb48e", // Sage
-        "#d8b260", // Mustard
-        "#77b1b0", // Dusty teal
-        "#a475af", // Plum
-      ],
-      names: [
-        "Denim",
-        "Terracotta",
-        "Dusty rose",
-        "Mauve",
-        "Sage",
-        "Mustard",
-        "Dusty teal",
-        "Plum",
-      ],
-    },
-    nautical: {
-      label: "Nautical",
-      colors: [
-        "#0f2a5f", // Navy
-        "#8b320b", // Red lead
-        "#730533", // Signal red
-        "#5c6b76", // Storm grey
-        "#294c2a", // Kelp
-        "#72511e", // Brass
-        "#115e5e", // Deep sea
-        "#453065", // Twilight
-      ],
-      names: [
-        "Navy",
-        "Red lead",
-        "Signal red",
-        "Storm grey",
-        "Kelp",
-        "Brass",
-        "Deep sea",
-        "Twilight",
-      ],
-    },
-    vaporwave: {
-      label: "Vaporwave",
-      colors: [
-        "#01cdfe", // Cyan
-        "#fd7f82", // Coral
-        "#ff71ce", // Hot pink
-        "#8c9cfb", // Periwinkle
-        "#fffb96", // Lemon
-        "#fda573", // Sunset orange
-        "#05ffa1", // Mint
-        "#b967ff", // Purple
-      ],
-      names: [
-        "Cyan",
-        "Coral",
-        "Hot pink",
-        "Periwinkle",
-        "Lemon",
-        "Sunset orange",
-        "Mint",
-        "Purple",
-      ],
-    },
-    colorblind: {
-      // Designed to stay distinguishable with deuteranopia, protanopia, and
-      // tritanopia: black text lets lightness vary, which survives color blindness
-      label: "Accessible",
-      colors: [
-        "#85e1f8", // Sky
-        "#c37d31", // Caramel
-        "#f6a696", // Salmon
-        "#94b4f4", // Periwinkle
-        "#bcfbbb", // Mint
-        "#d4db4c", // Citron
-        "#349984", // Teal
-        "#9b72ef", // Violet
-      ],
-      names: [
-        "Sky",
-        "Caramel",
-        "Salmon",
-        "Periwinkle",
-        "Mint",
-        "Citron",
-        "Teal",
-        "Violet",
-      ],
-    },
-  };
-
-  // Slots keep a counter's color family across palettes (slot 0 is bluish in
-  // every palette, and so on), so slot order isn't rainbow order. Pickers show
-  // swatches sorted by hue instead, with near-greys last.
-  const hueOf = (hex) => {
-    const [r, g, b] = [1, 3, 5].map(
-      (i) => parseInt(hex.slice(i, i + 2), 16) / 255,
-    );
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    if (max - min < 0.08) return 999; // near-grey: sort last
-    const d = max - min;
-    const h =
-      max === r
-        ? ((g - b) / d) % 6
-        : max === g
-          ? (b - r) / d + 2
-          : (r - g) / d + 4;
-    return (h * 60 + 360) % 360;
-  };
-
-  const sortColorsByHue = (hexes) =>
-    [...hexes].sort((a, b) => hueOf(a) - hueOf(b));
+  // Shipped palettes live in palettes.js; lab mode may register a temporary candidate
+  const palettes = { ...PALETTES };
+  let activeLabCandidateKey = null;
 
   const getSwatchesInDisplayOrder = () =>
     [...getSwatches()].sort((a, b) => hueOf(a.hex) - hueOf(b.hex));
@@ -476,36 +347,6 @@ import { log } from "./logger.js";
     }));
   };
 
-  // Helper: Convert HSL (0-360, 0-100, 0-100) to #rrggbb
-  const hslToHex = (h, s, l) => {
-    const hue = ((Number(h) % 360) + 360) % 360;
-    const sat = s / 100;
-    const lig = l / 100;
-    const k = (n) => (n + hue / 30) % 12;
-    const a = sat * Math.min(lig, 1 - lig);
-    const f = (n) =>
-      Math.round(
-        255 * (lig - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)))),
-      );
-    return (
-      "#" +
-      [f(0), f(8), f(4)].map((v) => v.toString(16).padStart(2, "0")).join("")
-    );
-  };
-
-  // Helpers: WCAG relative luminance and contrast ratio for #rrggbb colors
-  const relativeLuminance = (hex) => {
-    const channel = (i) => {
-      const c = parseInt(hex.slice(i, i + 2), 16) / 255;
-      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    };
-    return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
-  };
-  const contrastRatio = (a, b) => {
-    const [hi, lo] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
-    return (hi + 0.05) / (lo + 0.05);
-  };
-
   // Helper: Mix a #rrggbb color toward another by t (0-1)
   const mixHex = (hex, toward, t) =>
     "#" +
@@ -517,39 +358,36 @@ import { log } from "./logger.js";
       })
       .join("");
 
-  // Helper: Black or white text, whichever contrasts more with a #rrggbb background
-  const getReadableTextColor = (hex) => {
-    if (!/^#[0-9a-f]{6}$/i.test(hex)) return "#ffffff";
-    const whiteContrast = contrastRatio(hex, "#ffffff");
-    // Prefer white whenever it passes WCAG AA (4.5:1). White only gains contrast
-    // under the card header's dark overlay, while black loses it, so a color
-    // where black barely wins on the body could still fail in the header.
-    if (whiteContrast >= 4.5) return "#ffffff";
-    // Otherwise (light custom colors) use pure black, which beats near-black.
-    return whiteContrast >= contrastRatio(hex, "#000000") ? "#ffffff" : "#000000";
-  };
+  // Dice catalog mapped 1:1 to the 8 slots of the active palette
+  const DICE_CATALOG = [
+    { sides: 2, label: "d2", name: "Coin (d2)" },
+    { sides: 4, label: "d4", name: "d4" },
+    { sides: 6, label: "d6", name: "d6" },
+    { sides: 8, label: "d8", name: "d8" },
+    { sides: 10, label: "d10", name: "d10" },
+    { sides: 12, label: "d12", name: "d12" },
+    { sides: 20, label: "d20", name: "d20" },
+    { sides: 100, label: "d100", name: "d100" },
+  ];
 
-  // Helper: Convert #rrggbb to { h, s, l } (0-360, 0-100, 0-100)
-  const hexToHsl = (hex) => {
-    if (!/^#[0-9a-f]{6}$/i.test(hex)) return { h: 205, s: 82, l: 58 };
-    const [r, g, b] = [1, 3, 5].map(
-      (i) => parseInt(hex.slice(i, i + 2), 16) / 255,
-    );
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    const l = (max + min) / 2;
-    if (max === min) return { h: 0, s: 0, l: l * 100 };
-    const d = max - min;
-    const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    const h =
-      max === r
-        ? ((g - b) / d + (g < b ? 6 : 0)) * 60
-        : max === g
-          ? ((b - r) / d + 2) * 60
-          : ((r - g) / d + 4) * 60;
-    return { h, s: s * 100, l: l * 100 };
+  // Sync 3D faceted SVG die color tokens on #tab-dice from the active palette
+  const applyDicePalette = () => {
+    const tabDice = $("#tab-dice");
+    if (!tabDice) return;
+    const swatches = getSwatches();
+    DICE_CATALOG.forEach((die, idx) => {
+      const hex = swatches[idx % swatches.length]?.hex || "#38bdf8";
+      const light = mixHex(hex, "#ffffff", 0.24);
+      const dark = mixHex(hex, "#000000", 0.28);
+      const ink = getReadableTextColor(hex);
+      const edge = mixHex(hex, "#000000", 0.42);
+      tabDice.style.setProperty(`--die-c-${die.sides}`, hex);
+      tabDice.style.setProperty(`--die-c-${die.sides}-light`, light);
+      tabDice.style.setProperty(`--die-c-${die.sides}-dark`, dark);
+      tabDice.style.setProperty(`--die-c-${die.sides}-ink`, ink);
+      tabDice.style.setProperty(`--die-c-${die.sides}-edge`, edge);
+    });
   };
-
   const hexToRgba = (hex, alpha) => {
     const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
@@ -628,184 +466,8 @@ import { log } from "./logger.js";
     }
   };
 
-  // Update --theme-hue plus readable accent tokens across all light and dark
-  // surfaces so text meets WCAG 1.4.3 (4.5:1) and icons/marks meet 1.4.11 (3:1).
   const applyAccentTokens = (hue) => {
-    const root = document.documentElement;
-    root.style.setProperty("--theme-hue", hue);
-    const rawLight = hslToHex(hue, 94, 60);
-    const accDark = hslToHex(hue, 92, 65);
-
-    const hNorm = ((Number(hue) % 360) + 360) % 360;
-
-    // On blues/purples (195°–285°, including default 205°), reach 4.55:1 in light
-    // mode so primary buttons get crisp white text instead of hard-to-read black on blue;
-    // elsewhere gently nudge mid-tones (L >= 44%) when 3.05:1 is within reach so red (0°)
-    // stays bright #f93939 and yellow stays sunny.
-    let accLight = rawLight;
-    if (hNorm >= 195 && hNorm <= 285) {
-      for (let l = 60; l >= 32; l -= 0.5) {
-        const candidate = hslToHex(hue, 94, l);
-        if (
-          contrastRatio(candidate, "#ffffff") >= 4.55 &&
-          contrastRatio(candidate, "#f2f3f7") >= 4.55
-        ) {
-          accLight = candidate;
-          break;
-        }
-      }
-    } else {
-      for (let l = 60; l >= 44; l -= 0.5) {
-        const candidate = hslToHex(hue, 94, l);
-        if (
-          contrastRatio(candidate, "#ffffff") >= 3.05 &&
-          contrastRatio(candidate, "#f2f3f7") >= 3.05
-        ) {
-          accLight = candidate;
-          break;
-        }
-      }
-    }
-
-    // Darkening yellow (42°–86°) at fixed HSL hue turns it swamp olive; smoothly
-    // warm that band toward golden amber so darkened light-mode tokens read as gold.
-    const darkenableHue =
-      hNorm > 42 && hNorm < 86
-        ? hNorm - 17 * 0.5 * (1 - Math.cos((2 * Math.PI * (hNorm - 42)) / (86 - 42)))
-        : hNorm;
-
-    const lightSurfaces = [
-      "#ffffff",
-      "#f2f3f7",
-      "#e9ebee",
-      mixHex("#e9ebee", rawLight, 0.1),
-      mixHex("#ffffff", rawLight, 0.1),
-      mixHex("#e9ebee", accLight, 0.1),
-      mixHex("#ffffff", accLight, 0.1),
-    ];
-    let inkLight = "#000000";
-    for (let l = 60; l >= 0; l -= 0.5) {
-      const candidate = hslToHex(darkenableHue, 94, l);
-      if (lightSurfaces.every((s) => contrastRatio(candidate, s) >= 4.6)) {
-        inkLight = candidate;
-        break;
-      }
-    }
-    const darkSurfaces = [
-      "#0d0e11",
-      "#16171d",
-      "#21232c",
-      mixHex("#21232c", accDark, 0.15),
-      mixHex("#16171d", accDark, 0.15),
-    ];
-    let inkDark = "#ffffff";
-    for (let l = 65; l <= 100; l += 0.5) {
-      const candidate = hslToHex(hue, 92, l);
-      if (darkSurfaces.every((s) => contrastRatio(candidate, s) >= 4.6)) {
-        inkDark = candidate;
-        break;
-      }
-    }
-    let graphicLight = "#000000";
-    for (let l = 60; l >= 0; l -= 0.5) {
-      const candidate = hslToHex(darkenableHue, 94, l);
-      if (
-        ["#ffffff", "#f2f3f7", "#e9ebee"].every(
-          (s) => contrastRatio(candidate, s) >= 3.15,
-        )
-      ) {
-        graphicLight = candidate;
-        break;
-      }
-    }
-    let graphicDark = "#ffffff";
-    for (let l = 65; l <= 100; l += 0.5) {
-      const candidate = hslToHex(hue, 92, l);
-      if (
-        ["#0d0e11", "#16171d", "#21232c"].every(
-          (s) => contrastRatio(candidate, s) >= 3.15,
-        )
-      ) {
-        graphicDark = candidate;
-        break;
-      }
-    }
-
-    const lightFillContrasts =
-      contrastRatio(accLight, "#ffffff") >= 3 &&
-      contrastRatio(accLight, "#f2f3f7") >= 3;
-    const darkFillContrasts =
-      contrastRatio(accDark, "#16171d") >= 3 &&
-      contrastRatio(accDark, "#0d0e11") >= 3;
-
-    let navTextLight = "#000000";
-    for (let l = 60; l >= 0; l -= 0.5) {
-      const candidate = hslToHex(darkenableHue, 94, l);
-      if (contrastRatio(candidate, "#f2f3f7") >= 4.55) {
-        navTextLight = candidate;
-        break;
-      }
-    }
-    let navTextDark = "#ffffff";
-    for (let l = 65; l <= 100; l += 0.5) {
-      const candidate = hslToHex(hue, 92, l);
-      if (contrastRatio(candidate, "#0d0e11") >= 4.55) {
-        navTextDark = candidate;
-        break;
-      }
-    }
-
-    root.style.setProperty("--accent-fill-light", accLight);
-    root.style.setProperty("--accent-ink-light", inkLight);
-    root.style.setProperty("--accent-ink-dark", inkDark);
-    root.style.setProperty("--accent-graphic-light", graphicLight);
-    root.style.setProperty("--accent-graphic-dark", graphicDark);
-    root.style.setProperty(
-      "--accent-large-text-light",
-      contrastRatio(accLight, "#ffffff") >= 3 ? accLight : graphicLight,
-    );
-    root.style.setProperty(
-      "--accent-large-text-dark",
-      contrastRatio(accDark, "#16171d") >= 3 ? accDark : graphicDark,
-    );
-    root.style.setProperty(
-      "--accent-nav-icon-light",
-      contrastRatio(accLight, "#f2f3f7") >= 3 ? accLight : graphicLight,
-    );
-    root.style.setProperty(
-      "--accent-nav-icon-dark",
-      contrastRatio(accDark, "#0d0e11") >= 3 ? accDark : graphicDark,
-    );
-    root.style.setProperty("--accent-nav-text-light", navTextLight);
-    root.style.setProperty("--accent-nav-text-dark", navTextDark);
-    root.style.setProperty(
-      "--accent-badge-rim-light",
-      lightFillContrasts ? "none" : graphicLight,
-    );
-    root.style.setProperty(
-      "--accent-badge-rim-dark",
-      darkFillContrasts ? "none" : graphicDark,
-    );
-    root.style.setProperty(
-      "--accent-badge-radius-light",
-      lightFillContrasts ? "11.25px" : "10.75px",
-    );
-    root.style.setProperty(
-      "--accent-badge-radius-dark",
-      darkFillContrasts ? "11.25px" : "10.75px",
-    );
-    root.style.setProperty(
-      "--accent-badge-mark-light",
-      contrastRatio(accLight, "#ffffff") >= 3 ? "#ffffff" : "#000000",
-    );
-    root.style.setProperty(
-      "--accent-fill-border-light",
-      lightFillContrasts
-        ? "transparent"
-        : `color-mix(in srgb, ${graphicLight} 45%, transparent)`,
-    );
-    root.style.setProperty("--accent-on-fill-light", getReadableTextColor(accLight));
-    root.style.setProperty("--accent-on-fill-dark", getReadableTextColor(accDark));
+    applySharedAccentTokens(hue);
     if (ambientInitialized && currentAmbientLeaderHex === null) {
       updateAmbientBackdrop(null, { immediate: true });
     }
@@ -844,6 +506,13 @@ import { log } from "./logger.js";
   // 2. Local Storage Synchronizer
   // ------------------------------------------------------------------------
   const loadStateFromStorage = async () => {
+    if (isLabMode) {
+      state.settings.theme = "dark";
+      state.settings.layout = "grid";
+      applyTheme(state.settings.theme);
+      applyAccentTokens(state.settings.themeHue);
+      return;
+    }
     try {
       const savedCounters = (await Preferences.get({ key: "counters-list" }))
         .value;
@@ -901,6 +570,10 @@ import { log } from "./logger.js";
   };
 
   const saveCounters = () => {
+    if (isLabMode) {
+      window.__countersLabOnStateChange?.();
+      return;
+    }
     Preferences.set({
       key: "counters-list",
       // isNew is a transient render flag; persisting it replays the entry animation on next launch
@@ -911,6 +584,10 @@ import { log } from "./logger.js";
   };
 
   const saveSettings = () => {
+    if (isLabMode) {
+      window.__countersLabOnStateChange?.();
+      return;
+    }
     Preferences.set({
       key: "counters-settings",
       value: JSON.stringify(state.settings),
@@ -922,6 +599,7 @@ import { log } from "./logger.js";
   };
 
   const saveHistory = () => {
+    if (isLabMode) return;
     Preferences.set({
       key: "counters-history",
       value: JSON.stringify(state.history),
@@ -976,45 +654,7 @@ import { log } from "./logger.js";
     return presetSwatch.hex;
   };
 
-  // Helper: Text color for the card label, which sits on the card header's 12%
-  // black overlay. Keeps the card's text color unless that falls below 4.5:1
-  // there, as black can on mid-tones (e.g. #777777); the value below is large
-  // text that only needs 3:1, so it keeps the card color.
-  const getHeaderTextColor = (hex, text) => {
-    if (!/^#[0-9a-f]{6}$/i.test(hex)) return text;
-    const header = mixHex(hex, "#000000", 0.12);
-    if (contrastRatio(header, text) >= 4.5) return text;
-    return contrastRatio(header, "#ffffff") >= contrastRatio(header, "#000000")
-      ? "#ffffff"
-      : "#000000";
-  };
-
-  // Helper: Mix a #rrggbb color toward `toward`, starting at `start`, only as
-  // far as needed to reach 4.5:1 on `surface`
-  const getReadableInk = (hex, surface, toward, start) => {
-    for (let t = start; t < 1; t += 0.05) {
-      const ink = mixHex(hex, toward, t);
-      if (contrastRatio(ink, surface) >= 4.5) return ink;
-    }
-    return toward;
-  };
-
-  // Helper: The counter color as text on a light surface tinted 10% with it
-  // (e.g. the calculator's title pill). Starts at the usual 85% shade and
-  // darkens only as far as needed for 4.5:1, so pale colors stay readable.
-  const getInkOnLightTint = (hex) => {
-    if (!/^#[0-9a-f]{6}$/i.test(hex)) return "#000000";
-    return getReadableInk(hex, mixHex("#ffffff", hex, 0.1), "#000000", 0.15);
-  };
-
-  // Helper: The dark mode counterpart, on the dark sheet surface tinted 15%.
-  // Lightens from `start` (0 keeps the color as is) so dark colors stay readable.
-  const getInkOnDarkTint = (hex, start = 0) => {
-    if (!/^#[0-9a-f]{6}$/i.test(hex)) return "#ffffff";
-    return getReadableInk(hex, mixHex("#16171d", hex, 0.15), "#ffffff", start);
-  };
-
-  // Helper: Theme a bottom sheet with a counter color and readable text on it
+  // Theme a bottom sheet with a counter color and readable text on it
   const setSheetTheme = (dialog, hex) => {
     dialog.style.setProperty("--sheet-theme", hex);
     dialog.style.setProperty("--sheet-text", getReadableTextColor(hex));
@@ -1122,6 +762,346 @@ import { log } from "./logger.js";
       if (!state.settings.soundEnabled) return;
       playClickSound(400, 400, 0.15, 0.06);
     }, 200);
+  };
+
+  // Curated harmonic chords so every new finger harmonizes cleanly and rings clearly
+  // on phone speakers. Light mode uses bright major triads (roots C4-G4); dark mode
+  // uses deeper pure minor triads (roots D3-A3) with no relative-major 7th ambiguity.
+  const PICKER_MAJOR_CHORDS = [
+    { name: "C", notes: [60, 64, 67, 72, 76, 79, 84, 88] },
+    { name: "D", notes: [62, 66, 69, 74, 78, 81, 86, 90] },
+    { name: "Eb", notes: [63, 67, 70, 75, 79, 82, 87, 91] },
+    { name: "E", notes: [64, 68, 71, 76, 80, 83, 88, 92] },
+    { name: "F", notes: [65, 69, 72, 77, 81, 84, 89, 93] },
+    { name: "G", notes: [67, 71, 74, 79, 83, 86, 91, 95] },
+  ];
+
+  const PICKER_MINOR_CHORDS = [
+    { name: "Dm", notes: [50, 53, 57, 62, 65, 69, 74, 77] },
+    { name: "Em", notes: [52, 55, 59, 64, 67, 71, 76, 79] },
+    { name: "Fm", notes: [53, 56, 60, 65, 68, 72, 77, 80] },
+    { name: "F#m", notes: [54, 57, 61, 66, 69, 73, 78, 81] },
+    { name: "Gm", notes: [55, 58, 62, 67, 70, 74, 79, 82] },
+    { name: "Am", notes: [57, 60, 64, 69, 72, 76, 81, 84] },
+  ];
+
+  const isPickerDarkMode = () =>
+    document.documentElement.classList.contains("dark-mode");
+
+  const getPickerChordBank = () =>
+    isPickerDarkMode() ? PICKER_MINOR_CHORDS : PICKER_MAJOR_CHORDS;
+
+  const midiToFreq = (midi) => 440 * Math.pow(2, (midi - 69) / 12);
+
+  // Shipped instruments live in palettes.js; lab mode may register a temporary candidate
+  const PALETTE_INSTRUMENTS = { ...SHIPPED_PALETTE_INSTRUMENTS };
+
+  const getActivePickerInstrument = () => {
+    const base =
+      PALETTE_INSTRUMENTS[state.settings.palette] || PALETTE_INSTRUMENTS.bold;
+    if (!isPickerDarkMode()) return base;
+    return {
+      ...base,
+      filterHz: Math.round(base.filterHz * 0.75),
+      swellFilterHz: Math.round(base.swellFilterHz * 0.75),
+    };
+  };
+
+  let pickerChordBus = null;
+  let pickerChordFilter = null;
+  const getPickerChordBus = () => {
+    const ctx = getAudioContext();
+    if (!pickerChordBus) {
+      const busGain = ctx.createGain();
+      busGain.gain.setValueAtTime(1, ctx.currentTime);
+      let head = busGain;
+      if (typeof ctx.createBiquadFilter === "function") {
+        const filter = ctx.createBiquadFilter();
+        filter.type = "lowpass";
+        filter.frequency.setValueAtTime(
+          getActivePickerInstrument().filterHz,
+          ctx.currentTime,
+        );
+        filter.Q.setValueAtTime(
+          getActivePickerInstrument().filterQ,
+          ctx.currentTime,
+        );
+        head.connect(filter);
+        head = filter;
+        pickerChordFilter = filter;
+      }
+      if (typeof ctx.createDynamicsCompressor === "function") {
+        const comp = ctx.createDynamicsCompressor();
+        comp.threshold.setValueAtTime(-16, ctx.currentTime);
+        comp.knee.setValueAtTime(18, ctx.currentTime);
+        comp.ratio.setValueAtTime(4, ctx.currentTime);
+        head.connect(comp);
+        comp.connect(ctx.destination);
+      } else {
+        head.connect(ctx.destination);
+      }
+      pickerChordBus = busGain;
+    }
+    return pickerChordBus;
+  };
+
+  const resetPickerChordSwell = () => {
+    if (!pickerChordBus || !audioCtx) return;
+    try {
+      const now = audioCtx.currentTime;
+      const inst = getActivePickerInstrument();
+      pickerChordBus.gain.cancelScheduledValues(now);
+      pickerChordBus.gain.setValueAtTime(
+        Math.max(0.01, pickerChordBus.gain.value || 1),
+        now,
+      );
+      pickerChordBus.gain.linearRampToValueAtTime(1, now + 0.06);
+      if (pickerChordFilter) {
+        pickerChordFilter.frequency.cancelScheduledValues(now);
+        pickerChordFilter.frequency.setValueAtTime(
+          Math.max(120, pickerChordFilter.frequency.value || inst.filterHz),
+          now,
+        );
+        pickerChordFilter.frequency.linearRampToValueAtTime(
+          inst.filterHz,
+          now + 0.06,
+        );
+        pickerChordFilter.Q.setValueAtTime(inst.filterQ, now);
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
+  // Hold steady for the first part of the countdown, then swell smoothly during the final second
+  const schedulePickerChordSwell = (countdownMs = 3000) => {
+    if (!state.settings.soundEnabled) return;
+    try {
+      const ctx = getAudioContext();
+      const bus = getPickerChordBus();
+      const inst = getActivePickerInstrument();
+      const now = ctx.currentTime;
+      const totalSec = countdownMs / 1000;
+      const swellStart = now + Math.max(0, totalSec - 1);
+      const swellEnd = now + totalSec;
+      bus.gain.cancelScheduledValues(now);
+      bus.gain.setValueAtTime(Math.max(0.01, bus.gain.value || 1), now);
+      bus.gain.linearRampToValueAtTime(1, now + 0.06);
+      bus.gain.setValueAtTime(1, Math.max(now + 0.06, swellStart));
+      bus.gain.exponentialRampToValueAtTime(9.5, swellEnd);
+      if (pickerChordFilter) {
+        pickerChordFilter.Q.setValueAtTime(inst.filterQ, now);
+        pickerChordFilter.frequency.cancelScheduledValues(now);
+        pickerChordFilter.frequency.setValueAtTime(
+          Math.max(120, pickerChordFilter.frequency.value || inst.filterHz),
+          now,
+        );
+        pickerChordFilter.frequency.linearRampToValueAtTime(
+          inst.filterHz,
+          now + 0.06,
+        );
+        pickerChordFilter.frequency.setValueAtTime(
+          inst.filterHz,
+          Math.max(now + 0.06, swellStart),
+        );
+        pickerChordFilter.frequency.exponentialRampToValueAtTime(
+          inst.swellFilterHz,
+          swellEnd,
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
+  // Sustained harmonic voice for a held finger: active palette instrument dropping to ~10% whisper until swell
+  const startPickerVoice = (midi) => {
+    if (!state.settings.soundEnabled || typeof midi !== "number") return null;
+    try {
+      const ctx = getAudioContext();
+      const bus = getPickerChordBus();
+      const inst = getActivePickerInstrument();
+      const now = ctx.currentTime;
+      const shiftedMidi = Math.min(96, midi + inst.octaveShift);
+      const freq = midiToFreq(shiftedMidi);
+
+      if (pickerChordFilter) {
+        pickerChordFilter.Q.setValueAtTime(inst.filterQ, now);
+        pickerChordFilter.frequency.setValueAtTime(inst.filterHz, now);
+      }
+
+      const voiceGain = ctx.createGain();
+      voiceGain.gain.setValueAtTime(0.0008, now);
+      voiceGain.gain.linearRampToValueAtTime(inst.peakVol, now + inst.attack);
+      voiceGain.gain.exponentialRampToValueAtTime(
+        inst.sustainVol,
+        now + inst.decay,
+      );
+      voiceGain.connect(bus);
+
+      const fundOsc = ctx.createOscillator();
+      fundOsc.type = inst.fundType;
+      fundOsc.frequency.setValueAtTime(freq, now);
+      if (inst.detuneCents && fundOsc.detune) {
+        fundOsc.detune.setValueAtTime(-inst.detuneCents, now);
+      }
+      fundOsc.connect(voiceGain);
+      fundOsc.start(now);
+
+      const overGain = ctx.createGain();
+      overGain.gain.setValueAtTime(inst.overPeak, now);
+      overGain.gain.exponentialRampToValueAtTime(
+        inst.overSustain,
+        now + inst.overDecay,
+      );
+      overGain.connect(voiceGain);
+
+      const overOsc = ctx.createOscillator();
+      overOsc.type = inst.overType;
+      overOsc.frequency.setValueAtTime(freq * inst.overMult, now);
+      if (inst.detuneCents && overOsc.detune) {
+        overOsc.detune.setValueAtTime(inst.detuneCents, now);
+      }
+      overOsc.connect(overGain);
+      overOsc.start(now);
+
+      let stopped = false;
+      return {
+        stop(fadeSec = 0.12) {
+          if (stopped) return;
+          stopped = true;
+          try {
+            const t = ctx.currentTime;
+            voiceGain.gain.cancelScheduledValues(t);
+            voiceGain.gain.setValueAtTime(
+              Math.max(0.0008, voiceGain.gain.value || inst.sustainVol),
+              t,
+            );
+            voiceGain.gain.exponentialRampToValueAtTime(0.0005, t + fadeSec);
+            fundOsc.stop(t + fadeSec + 0.02);
+            overOsc.stop(t + fadeSec + 0.02);
+          } catch {
+            /* ignore */
+          }
+        },
+      };
+    } catch (e) {
+      log.warn("Picker voice audio failed", e);
+      return null;
+    }
+  };
+
+  // Single plucked note voiced with the active palette's instrument
+  const playPickerNote = (
+    midi,
+    { duration = 0.55, vol = 0.075, delay = 0 } = {},
+  ) => {
+    if (!state.settings.soundEnabled || typeof midi !== "number") return;
+    try {
+      const ctx = getAudioContext();
+      const inst = getActivePickerInstrument();
+      const startTime = ctx.currentTime + delay;
+      const shiftedMidi = Math.min(96, midi + inst.octaveShift);
+      const freq = midiToFreq(shiftedMidi);
+      const scaledVol = vol * (inst.peakVol / 0.08);
+
+      let dest = ctx.destination;
+      if (typeof ctx.createBiquadFilter === "function") {
+        const noteFilter = ctx.createBiquadFilter();
+        noteFilter.type = "lowpass";
+        noteFilter.frequency.setValueAtTime(inst.swellFilterHz, startTime);
+        noteFilter.Q.setValueAtTime(inst.filterQ, startTime);
+        noteFilter.connect(ctx.destination);
+        dest = noteFilter;
+      }
+
+      const fundOsc = ctx.createOscillator();
+      const fundGain = ctx.createGain();
+      fundOsc.type = inst.fundType;
+      fundOsc.frequency.setValueAtTime(freq, startTime);
+      if (inst.detuneCents && fundOsc.detune) {
+        fundOsc.detune.setValueAtTime(-inst.detuneCents, startTime);
+      }
+      fundGain.gain.setValueAtTime(0.0008, startTime);
+      fundGain.gain.linearRampToValueAtTime(
+        scaledVol,
+        startTime + inst.attack,
+      );
+      fundGain.gain.exponentialRampToValueAtTime(
+        0.0008,
+        startTime + duration,
+      );
+      fundOsc.connect(fundGain);
+      fundGain.connect(dest);
+      fundOsc.start(startTime);
+      fundOsc.stop(startTime + duration + 0.02);
+
+      const overOsc = ctx.createOscillator();
+      const overGain = ctx.createGain();
+      overOsc.type = inst.overType;
+      overOsc.frequency.setValueAtTime(freq * inst.overMult, startTime);
+      if (inst.detuneCents && overOsc.detune) {
+        overOsc.detune.setValueAtTime(inst.detuneCents, startTime);
+      }
+      overGain.gain.setValueAtTime(0.0005, startTime);
+      overGain.gain.linearRampToValueAtTime(
+        scaledVol * inst.overPeak,
+        startTime + inst.attack,
+      );
+      overGain.gain.exponentialRampToValueAtTime(
+        0.0005,
+        startTime + duration * 0.65,
+      );
+      overOsc.connect(overGain);
+      overGain.connect(dest);
+      overOsc.start(startTime);
+      overOsc.stop(startTime + duration * 0.65 + 0.02);
+    } catch (e) {
+      log.warn("Picker note audio failed", e);
+    }
+  };
+
+  // Crisp harmonic pop tuned to a defeated pointer's note and active palette instrument
+  const playPickerPop = (midi) => {
+    if (!state.settings.soundEnabled || typeof midi !== "number") return;
+    const inst = getActivePickerInstrument();
+    const freq = midiToFreq(Math.min(96, midi + inst.octaveShift));
+    const { startMult, endMult, dur, vol } = inst.pop;
+    playClickSound(freq * startMult, freq * endMult, dur, vol);
+  };
+
+  // Chord resolution strum: brisk ascending major in light mode, brooding descending minor in dark mode
+  const playPickerResolve = (chord) => {
+    if (!state.settings.soundEnabled || !chord?.notes?.length) return;
+    const [root, third, fifth] = chord.notes;
+    const isDark = isPickerDarkMode();
+    const arpeggio = isDark
+      ? [root + 12, fifth, third, root]
+      : [root, third, fifth, root + 12];
+    const step = isDark ? 0.065 : 0.045;
+    const duration = isDark ? 0.9 : 0.75;
+    arpeggio.forEach((midi, idx) => {
+      playPickerNote(midi, {
+        duration,
+        vol: 0.065,
+        delay: idx * step,
+      });
+    });
+  };
+
+  // Short 3-note triad preview when selecting a palette in Settings (major in light, minor in dark)
+  const playPickerInstrumentPreview = () => {
+    if (!state.settings.soundEnabled) return;
+    const isDark = isPickerDarkMode();
+    const notes = isDark ? [57, 60, 64] : [60, 64, 67];
+    const step = isDark ? 0.065 : 0.055;
+    notes.forEach((midi, idx) => {
+      playPickerNote(midi, {
+        duration: idx === notes.length - 1 ? 0.45 : 0.32,
+        vol: 0.065,
+        delay: idx * step,
+      });
+    });
   };
 
   // Desktop Chrome/Edge expose navigator.vibrate but have no motor, so on the
@@ -1338,15 +1318,15 @@ import { log } from "./logger.js";
 
     if (!leaderContainer || !leaderText) return;
     if (state.counters.length === 0) {
-      leaderContainer.style.opacity = "0";
-      leaderContainer.style.pointerEvents = "none";
+      leaderContainer.classList.add("leader-empty");
+      leaderContainer.inert = true;
       leaderText.textContent = "";
       updateAmbientBackdrop(null);
       return;
     }
 
-    leaderContainer.style.opacity = "1";
-    leaderContainer.style.pointerEvents = "auto";
+    leaderContainer.classList.remove("leader-empty");
+    leaderContainer.inert = state.currentTab !== "counters";
 
     const type = state.settings.topBarContent;
     const icon = leaderContainer.querySelector(".leader-icon svg");
@@ -1977,6 +1957,76 @@ import { log } from "./logger.js";
   let programmaticTabTimeout = null;
   let resetPicker = () => {};
 
+  const syncHeaderScrollProgress = (slider) => {
+    if (!slider) return;
+    const width = slider.clientWidth;
+    if (!width) return;
+    const raw = Math.min(1, Math.max(0, slider.scrollLeft / width));
+    // Smoothstep S-curve: gentle start and end as Counters slides away or back
+    const eased = raw * raw * (3 - 2 * raw);
+    const visibility = 1 - eased;
+    $(".app-header")?.style.setProperty("--counters-visibility", visibility.toFixed(4));
+  };
+
+  let activeTitleAnim = null;
+  const crossFadeHeaderTitle = (viewTitle, nextTitle) => {
+    if (!viewTitle || viewTitle.textContent === nextTitle) return;
+    const container = viewTitle.parentElement;
+    if (container) {
+      container.querySelectorAll(".app-title-ghost").forEach((el) => el.remove());
+    }
+    if (activeTitleAnim) {
+      activeTitleAnim.cancel();
+      activeTitleAnim = null;
+    }
+
+    if (prefersReducedMotion() || typeof viewTitle.animate !== "function") {
+      viewTitle.textContent = nextTitle;
+      return;
+    }
+
+    const prevTitle = viewTitle.textContent;
+    if (container && prevTitle) {
+      const ghost = document.createElement("span");
+      ghost.className = "app-title-ghost";
+      ghost.setAttribute("aria-hidden", "true");
+      ghost.textContent = prevTitle;
+      container.appendChild(ghost);
+
+      const exitAnim = ghost.animate(
+        [
+          { opacity: 1, transform: "translateY(0)" },
+          { opacity: 0, transform: "translateY(-3px)" },
+        ],
+        {
+          duration: 240,
+          easing: "cubic-bezier(0.4, 0, 0.2, 1)",
+          fill: "forwards",
+        },
+      );
+      exitAnim.onfinish = () => ghost.remove();
+      exitAnim.oncancel = () => ghost.remove();
+    }
+
+    viewTitle.textContent = nextTitle;
+    activeTitleAnim = viewTitle.animate(
+      [
+        { opacity: 0, transform: "translateY(3px)" },
+        { opacity: 1, transform: "translateY(0)" },
+      ],
+      {
+        duration: 280,
+        easing: "cubic-bezier(0.4, 0, 0.2, 1)",
+      },
+    );
+    activeTitleAnim.onfinish = () => {
+      activeTitleAnim = null;
+    };
+    activeTitleAnim.oncancel = () => {
+      activeTitleAnim = null;
+    };
+  };
+
   const updateTabUI = (tabId) => {
     if (state.currentTab === tabId) return;
     const prevTab = state.currentTab;
@@ -1999,13 +2049,27 @@ import { log } from "./logger.js";
       panel.inert = panel.id !== "tab-" + tabId;
     });
 
-    // Update Topbar View Title
+    // Keep Counters-only header controls out of tab order when off-tab
+    const isCountersTab = tabId === "counters";
+    $(".app-header")?.setAttribute("data-active-tab", tabId);
+    $$(".counters-only-control").forEach((control) => {
+      const isLeaderEmpty =
+        control.id === "header-leader-container" && state.counters.length === 0;
+      control.inert = !isCountersTab || isLeaderEmpty;
+    });
+    const pickerModeBtn = $("#header-picker-mode");
+    if (pickerModeBtn) {
+      pickerModeBtn.inert = tabId !== "picker";
+    }
+
+    // Update Topbar View Title with soft cross-fade
     const viewTitle = $("#app-view-title");
     if (viewTitle) {
-      if (tabId === "counters") viewTitle.textContent = "Counters";
-      else if (tabId === "dice") viewTitle.textContent = "Dice";
-      else if (tabId === "timer") viewTitle.textContent = "Timer";
-      else if (tabId === "picker") viewTitle.textContent = "Picker";
+      let nextTitle = "Counters";
+      if (tabId === "dice") nextTitle = "Dice";
+      else if (tabId === "timer") nextTitle = "Timer";
+      else if (tabId === "picker") nextTitle = "Picker";
+      crossFadeHeaderTitle(viewTitle, nextTitle);
     }
   };
 
@@ -2018,16 +2082,23 @@ import { log } from "./logger.js";
     }, 450);
 
     updateTabUI(tabId);
-    
+
     // Smoothly scroll the native snap container to the target tab
     const slider = $("#tabs-slider");
     const target = document.getElementById("tab-" + tabId);
     if (slider && target) {
       const scrollTargetX = target.offsetLeft - slider.offsetLeft;
+      const instant = prefersReducedMotion();
       slider.scrollTo({
         left: scrollTargetX,
-        behavior: prefersReducedMotion() ? "instant" : "smooth",
+        behavior: instant ? "instant" : "smooth",
       });
+      if (instant) {
+        $(".app-header")?.style.setProperty(
+          "--counters-visibility",
+          tabId === "counters" ? "1" : "0",
+        );
+      }
     }
   };
 
@@ -2143,6 +2214,20 @@ import { log } from "./logger.js";
     }
   };
 
+  // Presets follow the ± toggle; it resets to + each time the sheet opens
+  const updateQuickSignDOM = () => {
+    const minus = state.calcQuickSign === "minus";
+    const toggle = $("#calc-quick-sign");
+    if (toggle) {
+      toggle.setAttribute("aria-pressed", minus ? "true" : "false");
+      toggle.classList.toggle("is-minus", minus);
+    }
+    $$("#calc-quick-add-container button[data-quick-val]").forEach((btn) => {
+      const val = parseFloat(btn.getAttribute("data-quick-val"));
+      btn.textContent = `${minus ? "−" : "+"}${formatNumber(val)}`;
+    });
+  };
+
   const openCalculator = (counterId, { byKeyboard = false } = {}) => {
     const counter = state.counters.find((c) => c.id === counterId);
     const dialog = $("#calculator-dialog");
@@ -2152,6 +2237,8 @@ import { log } from "./logger.js";
     state.calcPendingOperation = "plus";
     state.calcOpenedByKeyboard = byKeyboard;
     state.calcNumpadValue = "";
+    state.calcQuickSign = "plus";
+    updateQuickSignDOM();
 
     const hexColor = getCounterHex(counter);
     const titleEl = $("#calc-dialog-title");
@@ -2160,6 +2247,9 @@ import { log } from "./logger.js";
     updateNumpadDisplayDOM();
     setSheetTheme(dialog, hexColor);
     openDialog(dialog);
+    // Opened from the keyboard, focus stayed on the card behind the sheet, so
+    // typed digits never arrived. Put it on Add: digits still type, Enter adds.
+    if (byKeyboard) $("#calc-numpad-btn-add")?.focus({ preventScroll: true });
     playClickSound(600, 700, 0.08, 0.05);
   };
 
@@ -2193,12 +2283,19 @@ import { log } from "./logger.js";
 
     // Quick-add buttons apply instantly
     $("#calc-quick-add-container").addEventListener("click", (e) => {
+      if (e.target.closest("#calc-quick-sign")) {
+        playHaptic(ImpactStyle.Light);
+        playClickSound();
+        state.calcQuickSign = state.calcQuickSign === "minus" ? "plus" : "minus";
+        updateQuickSignDOM();
+        return;
+      }
       const btn = e.target.closest("button[data-quick-val]");
       if (!btn) return;
       playHaptic(ImpactStyle.Light);
       const amount = parseFloat(btn.getAttribute("data-quick-val") || "0");
       if (amount !== 0) {
-        state.calcPendingOperation = "plus";
+        state.calcPendingOperation = state.calcQuickSign;
         applyToActiveCounter(amount);
       }
     });
@@ -2269,6 +2366,8 @@ import { log } from "./logger.js";
     window.addEventListener("keydown", (e) => {
       if (!dialog.open) return;
       if (e.isComposing) return;
+      // Leave browser and OS shortcuts alone (Ctrl/⌘ + minus zooms out, + C copies)
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       if (/^[0-9]$/.test(e.key)) {
         e.preventDefault();
@@ -2313,6 +2412,12 @@ import { log } from "./logger.js";
         e.preventDefault();
         $("#calc-numpad-btn-subtract")?.click();
       } else if (e.key === "Enter") {
+        // Enter on a focused button (Subtract, C, a quick-add) presses that
+        // button. Enter from outside the sheet is the one that just opened it
+        // from a card, and must not immediately submit and close it.
+        const target = e.target instanceof Element ? e.target : null;
+        if (target?.closest("button")) return;
+        if (target && target !== document.body && !dialog.contains(target)) return;
         e.preventDefault();
         $("#calc-numpad-btn-add")?.click();
       }
@@ -2741,11 +2846,18 @@ import { log } from "./logger.js";
     const container = $("#calc-quick-add-container");
     if (!container) return;
 
-    container.innerHTML = state.settings.quickAddValues
-      .map((val) => {
-        return `<button data-quick-val="${val}">+${formatNumber(val)}</button>`;
-      })
-      .join("");
+    const rows = Math.max(1, Math.ceil(state.settings.quickAddValues.length / 3));
+    container.innerHTML =
+      `<button type="button" class="quick-sign-toggle" id="calc-quick-sign" aria-pressed="false" aria-label="Subtract preset amounts" style="grid-row: span ${rows}">` +
+      `<span class="quick-sign-plus" aria-hidden="true">+</span>` +
+      `<span class="quick-sign-minus" aria-hidden="true">−</span>` +
+      `</button>` +
+      state.settings.quickAddValues
+        .map((val) => {
+          return `<button data-quick-val="${val}">+${formatNumber(val)}</button>`;
+        })
+        .join("");
+    updateQuickSignDOM();
   };
 
   // ------------------------------------------------------------------------
@@ -3142,30 +3254,7 @@ import { log } from "./logger.js";
     const colorId = selectedSwatch.id;
 
     // Pick an unused placeholder label if possible
-    const labelChoices = [
-      "Crane",
-      "Egret",
-      "Finch",
-      "Flicker",
-      "Gull",
-      "Heron",
-      "Jay",
-      "Junco",
-      "Kite",
-      "Lark",
-      "Magpie",
-      "Merlin",
-      "Piper",
-      "Plover",
-      "Puffin",
-      "Robin",
-      "Sparrow",
-      "Starling",
-      "Swift",
-      "Tern",
-      "Vesper",
-      "Wren",
-    ];
+    const labelChoices = COUNTER_PLACEHOLDER_LABELS;
     const usedLabels = state.counters.map((c) => c.label);
     const unusedLabels = labelChoices.filter(
       (label) => !usedLabels.includes(label),
@@ -3412,7 +3501,8 @@ import { log } from "./logger.js";
       renderPaletteSetting();
       renderEditPaletteSwatches();
       renderCountersList();
-      playClickSound();
+      applyDicePalette();
+      playPickerInstrumentPreview();
       playSelectionHaptic();
       if (focus) {
         $(`#setting-palette-group [data-palette-opt="${key}"]`)?.focus();
@@ -3706,6 +3796,7 @@ import { log } from "./logger.js";
       const syncTabFromScroll = () => {
         const width = tabsSlider.clientWidth;
         if (!width) return;
+        syncHeaderScrollProgress(tabsSlider);
         const index = Math.round(tabsSlider.scrollLeft / width);
         const currentVisibleTab = TABS[Math.min(Math.max(index, 0), TABS.length - 1)];
 
@@ -3973,145 +4064,556 @@ import { log } from "./logger.js";
   // 18. Placeholders Interactive Actions (Extra Premium Polish!)
   // ------------------------------------------------------------------------
   const setupPlaceholdersInteractions = () => {
-    // 1. Redesigned Dice Roller
-    const diceShakeIcon = $("#dice-shake-icon");
-    const diceTypeSelector = $("#dice-type-selector");
-    const diceCountDisplay = $("#dice-count-display");
-    const btnDiceMinus = $("#btn-dice-minus");
-    const btnDicePlus = $("#btn-dice-plus");
-    const btnRollAction = $("#btn-roll-action");
+    // 1. Redesigned Interactive 3D Dice Roller
+    const diceTray = $("#dice-tray");
     const diceResultCard = $("#dice-result-card");
-    const diceResultBreakdown = $("#dice-result-breakdown");
     const diceResultTotal = $("#dice-result-total");
+    const dicePoolNotation = $("#dice-pool-notation");
+    const diceArena = $("#dice-arena");
+    const diceEmptyHint = $("#dice-empty-hint");
+    const diceModeGroup = $("#dice-mode-group");
+    const btnRollAction = $("#btn-roll-action");
+    const btnDiceClear = $("#btn-dice-clear");
 
-    // Tracks dice configuration
-    let currentDiceType = 6;
-    let currentDiceCount = 1;
-    // The dice behind the result on screen, e.g. "2d6" (null before a roll)
-    let rolledDice = null;
+    const MAX_DICE = 20;
+    const VALID_DICE_MODES = ["exact", "best", "worst"];
 
-    const syncDiceStepperButtons = () => {
-      if (btnDiceMinus) btnDiceMinus.disabled = currentDiceCount <= 1;
-      if (btnDicePlus) btnDicePlus.disabled = currentDiceCount >= 20;
+    applyDicePalette();
+
+    // Ensure persisted diceMode is valid
+    if (!VALID_DICE_MODES.includes(state.settings.diceMode)) {
+      state.settings.diceMode = "exact";
+    }
+
+    // In-memory session pool: each die holds rollA and (in best/worst mode) rollB
+    let nextDieId = 1;
+    let dicePool = [];
+    let isRolling = false;
+
+    const rollOne = (sides) => Math.floor(Math.random() * sides) + 1;
+
+    const getCountTier = (count) => {
+      if (count <= 3) return "lg";
+      if (count <= 6) return "md";
+      if (count <= 12) return "sm";
+      return "xs";
     };
-    syncDiceStepperButtons();
 
-    const updateRollButtonLabel = () => {
-      const dice = `${currentDiceCount}d${currentDiceType}`;
-      if (btnRollAction) {
-        btnRollAction.textContent = `Roll ${dice}`;
+    const formatFaceValue = (sides, value) => {
+      if (value == null) return sides === 2 ? "H/T" : `d${sides}`;
+      if (sides === 2) return value === 2 ? "H/2" : "T/1";
+      return String(value);
+    };
+
+    const formatPoolNotation = (pool) => {
+      const counts = new Map();
+      pool.forEach((d) => {
+        counts.set(d.sides, (counts.get(d.sides) || 0) + 1);
+      });
+      return DICE_CATALOG.filter((c) => counts.has(c.sides))
+        .map((c) => `${counts.get(c.sides)}d${c.sides}`)
+        .join(" + ");
+    };
+
+    // Generate stylized 3D faceted SVG polyhedra for each of the 8 die types
+    const createDieSvg = (sides, faceLabel) => {
+      const textLen = String(faceLabel).length;
+      const fontSize =
+        textLen >= 4 ? 13 : textLen === 3 ? 15 : textLen === 2 ? 18 : 21;
+
+      let shapes;
+      let textX = 32;
+      let textY;
+
+      if (sides === 2) {
+        // Beveled 3D coin
+        shapes = `
+          <circle cx="32" cy="34" r="24" class="die-facet-dark" />
+          <circle cx="32" cy="30" r="24" class="die-facet-light" />
+          <circle cx="32" cy="31" r="20" class="die-facet-base" />
+          <circle cx="32" cy="30" r="24" class="die-outline" />
+          <circle cx="32" cy="31" r="19" class="die-facet-seam" />
+        `;
+        textY = 31;
+      } else if (sides === 4) {
+        // 3D faceted tetrahedron
+        shapes = `
+          <polygon points="32,7 57,52 32,57" class="die-facet-dark" />
+          <polygon points="32,7 7,52 32,57" class="die-facet-light" />
+          <polygon points="32,14 51,50 13,50" class="die-facet-base" />
+          <line x1="32" y1="7" x2="32" y2="14" class="die-facet-seam" />
+          <line x1="7" y1="52" x2="13" y2="50" class="die-facet-seam" />
+          <line x1="57" y1="52" x2="51" y2="50" class="die-facet-seam" />
+          <polygon points="32,7 57,52 32,57 7,52" class="die-outline" />
+        `;
+        textY = 39;
+      } else if (sides === 6) {
+        // 3D beveled cube
+        shapes = `
+          <polygon points="11,20 21,10 54,10 45,20" class="die-facet-light" />
+          <polygon points="45,20 54,10 54,45 45,55" class="die-facet-dark" />
+          <rect x="9" y="19" width="37" height="37" rx="5" class="die-facet-base" />
+          <rect x="9" y="19" width="37" height="37" rx="5" class="die-outline" />
+          <polyline points="11,20 21,10 54,10 54,45 45,55" class="die-outline" />
+          <line x1="45" y1="20" x2="54" y2="10" class="die-facet-seam" />
+        `;
+        textX = 27.5;
+        textY = 38;
+      } else if (sides === 8) {
+        // 3D faceted octahedron
+        shapes = `
+          <polygon points="32,5 56,32 32,59 8,32" class="die-facet-dark" />
+          <polygon points="32,5 8,32 32,20" class="die-facet-light" />
+          <polygon points="32,5 56,32 32,20" class="die-facet-light" />
+          <polygon points="32,12 50,41 14,41" class="die-facet-base" />
+          <line x1="32" y1="5" x2="32" y2="12" class="die-facet-seam" />
+          <line x1="8" y1="32" x2="14" y2="41" class="die-facet-seam" />
+          <line x1="56" y1="32" x2="50" y2="41" class="die-facet-seam" />
+          <polygon points="32,5 56,32 32,59 8,32" class="die-outline" />
+        `;
+        textY = 33;
+      } else if (sides === 10) {
+        // 3D faceted kite / pentagonal trapezohedron
+        shapes = `
+          <polygon points="32,5 56,28 50,44 32,59 14,44 8,28" class="die-facet-dark" />
+          <polygon points="32,5 8,28 18,35 32,15" class="die-facet-light" />
+          <polygon points="32,5 56,28 46,35 32,15" class="die-facet-light" />
+          <polygon points="32,12 49,33 32,49 15,33" class="die-facet-base" />
+          <line x1="32" y1="5" x2="32" y2="12" class="die-facet-seam" />
+          <line x1="32" y1="49" x2="32" y2="59" class="die-facet-seam" />
+          <polygon points="32,5 56,28 50,44 32,59 14,44 8,28" class="die-outline" />
+        `;
+        textY = 32;
+      } else if (sides === 12) {
+        // 3D faceted dodecahedron
+        shapes = `
+          <polygon points="32,6 54,18 57,41 42,57 22,57 7,41 10,18" class="die-facet-dark" />
+          <polygon points="32,6 54,18 46,27 18,27 10,18" class="die-facet-light" />
+          <polygon points="32,15 48,27 42,46 22,46 16,27" class="die-facet-base" />
+          <line x1="32" y1="6" x2="32" y2="15" class="die-facet-seam" />
+          <line x1="54" y1="18" x2="48" y2="27" class="die-facet-seam" />
+          <line x1="10" y1="18" x2="16" y2="27" class="die-facet-seam" />
+          <line x1="42" y1="46" x2="42" y2="57" class="die-facet-seam" />
+          <line x1="22" y1="46" x2="22" y2="57" class="die-facet-seam" />
+          <polygon points="32,6 54,18 57,41 42,57 22,57 7,41 10,18" class="die-outline" />
+        `;
+        textY = 33;
+      } else if (sides === 20) {
+        // 3D faceted icosahedron
+        shapes = `
+          <polygon points="32,5 56,19 56,45 32,59 8,45 8,19" class="die-facet-dark" />
+          <polygon points="32,5 56,19 32,16 8,19" class="die-facet-light" />
+          <polygon points="8,19 16,44 8,45" class="die-facet-light" />
+          <polygon points="32,14 50,45 14,45" class="die-facet-base" />
+          <line x1="32" y1="5" x2="32" y2="14" class="die-facet-seam" />
+          <line x1="56" y1="19" x2="50" y2="45" class="die-facet-seam" />
+          <line x1="8" y1="19" x2="14" y2="45" class="die-facet-seam" />
+          <line x1="56" y1="45" x2="50" y2="45" class="die-facet-seam" />
+          <line x1="8" y1="45" x2="14" y2="45" class="die-facet-seam" />
+          <polygon points="32,5 56,19 56,45 32,59 8,45 8,19" class="die-outline" />
+        `;
+        textY = 35;
+      } else {
+        // d100 faceted percentile decagon
+        shapes = `
+          <polygon points="32,5 48,10 58,23 58,41 48,54 32,59 16,54 6,41 6,23 16,10" class="die-facet-dark" />
+          <polygon points="32,5 48,10 58,23 47,25 17,25 6,23 16,10" class="die-facet-light" />
+          <polygon points="32,13 44,18 50,32 44,46 32,51 20,46 14,32 20,18" class="die-facet-base" />
+          <polygon points="32,13 44,18 50,32 44,46 32,51 20,46 14,32 20,18" class="die-facet-seam" />
+          <polygon points="32,5 48,10 58,23 58,41 48,54 32,59 16,54 6,41 6,23 16,10" class="die-outline" />
+        `;
+        textY = 32;
       }
-      // Highlight the result only while it matches the selected dice
-      diceResultCard?.classList.toggle("rolled", rolledDice === dice);
+
+      return `<svg class="die-svg" viewBox="0 0 64 64" aria-hidden="true" focusable="false">${shapes}<text x="${textX}" y="${textY}" font-size="${fontSize}" class="die-face-text">${faceLabel}</text></svg>`;
     };
 
-    if (diceTypeSelector) {
-      const typeButtons = diceTypeSelector.querySelectorAll(".dice-type-btn");
-      typeButtons.forEach((btn) => {
-        btn.addEventListener("click", () => {
-          playHaptic(ImpactStyle.Light);
-          typeButtons.forEach((b) => {
-            const isActive = b === btn;
-            b.classList.toggle("active", isActive);
-            b.setAttribute("aria-pressed", isActive ? "true" : "false");
-          });
-          currentDiceType = parseInt(btn.getAttribute("data-type")) || 6;
-          updateRollButtonLabel();
-          playClickSound(650, 500, 0.05, 0.04);
+    const getPoolSummary = () => {
+      const mode = state.settings.diceMode || "exact";
+      const sumA = dicePool.reduce((acc, d) => acc + d.rollA, 0);
+      if (mode === "exact") {
+        return {
+          mode,
+          isDual: false,
+          sumA,
+          sumB: null,
+          aWins: true,
+          winningSum: sumA,
+          discardedSum: null,
+          winningRolls: dicePool.map((d) => d.rollA),
+        };
+      }
+      const sumB = dicePool.reduce((acc, d) => acc + (d.rollB ?? d.rollA), 0);
+      const aWins = mode === "best" ? sumA >= sumB : sumA <= sumB;
+      return {
+        mode,
+        isDual: true,
+        sumA,
+        sumB,
+        aWins,
+        winningSum: aWins ? sumA : sumB,
+        discardedSum: aWins ? sumB : sumA,
+        winningRolls: dicePool.map((d) => (aWins ? d.rollA : (d.rollB ?? d.rollA))),
+      };
+    };
+
+    const syncModeButtons = () => {
+      if (!diceModeGroup) return;
+      const mode = state.settings.diceMode || "exact";
+      diceModeGroup.querySelectorAll(".dice-mode-btn").forEach((btn) => {
+        const isActive = btn.dataset.diceMode === mode;
+        btn.classList.toggle("active", isActive);
+        btn.setAttribute("aria-checked", isActive ? "true" : "false");
+        btn.tabIndex = isActive ? 0 : -1;
+      });
+    };
+
+    const syncControls = () => {
+      const hasDice = dicePool.length > 0;
+      const atCap = dicePool.length >= MAX_DICE;
+
+      if (diceTray) {
+        diceTray.querySelectorAll(".dice-tray-btn").forEach((btn) => {
+          btn.disabled = atCap || isRolling;
         });
-      });
-    }
+      }
 
-    if (btnDiceMinus) {
-      btnDiceMinus.addEventListener("click", () => {
-        if (currentDiceCount > 1) {
-          playHaptic(ImpactStyle.Light);
-          currentDiceCount--;
-          if (diceCountDisplay) {
-            diceCountDisplay.textContent = currentDiceCount;
-          }
-          syncDiceStepperButtons();
-          updateRollButtonLabel();
-          playClickSound(550, 450, 0.05, 0.04);
+      if (btnRollAction) {
+        btnRollAction.disabled = !hasDice || isRolling;
+      }
+
+      if (btnDiceClear) {
+        btnDiceClear.disabled = !hasDice || isRolling;
+      }
+
+      if (dicePoolNotation) {
+        dicePoolNotation.textContent = hasDice
+          ? formatPoolNotation(dicePool)
+          : "";
+      }
+    };
+
+    const buildRollSetElement = ({
+      setKey,
+      label,
+      sum,
+      values,
+      statusClass,
+      animateIds,
+      showHeader,
+    }) => {
+      const wrapper = document.createElement("div");
+      wrapper.className = `dice-roll-set${statusClass ? ` ${statusClass}` : ""}`;
+      wrapper.dataset.rollSet = setKey;
+
+      if (showHeader) {
+        const header = document.createElement("div");
+        header.className = "dice-roll-set-header";
+        header.innerHTML = `
+          <span class="dice-roll-set-label">${label}</span>
+          <span class="dice-roll-set-sum">${sum}</span>
+        `;
+        wrapper.appendChild(header);
+      }
+
+      const area = document.createElement("div");
+      area.className = "dice-area";
+      area.dataset.countTier = getCountTier(dicePool.length);
+
+      dicePool.forEach((die, idx) => {
+        const val = values[idx];
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "die-chip";
+        if (animateIds && animateIds.has(die.id)) {
+          btn.classList.add("is-tumbling");
         }
+        btn.dataset.dieId = String(die.id);
+        btn.dataset.sides = String(die.sides);
+        const face = formatFaceValue(die.sides, val);
+        btn.setAttribute(
+          "aria-label",
+          `${die.sides === 2 ? `Coin rolled ${face}` : `d${die.sides} rolled ${face}`}, tap to remove`,
+        );
+        btn.innerHTML = createDieSvg(die.sides, face);
+        area.appendChild(btn);
       });
-    }
 
-    if (btnDicePlus) {
-      btnDicePlus.addEventListener("click", () => {
-        if (currentDiceCount < 20) {
-          playHaptic(ImpactStyle.Light);
-          currentDiceCount++;
-          if (diceCountDisplay) {
-            diceCountDisplay.textContent = currentDiceCount;
-          }
-          syncDiceStepperButtons();
-          updateRollButtonLabel();
-          playClickSound(650, 750, 0.05, 0.04);
-        }
-      });
-    }
+      wrapper.appendChild(area);
+      return wrapper;
+    };
 
-    if (
-      btnRollAction &&
-      diceResultTotal &&
-      diceResultBreakdown &&
-      diceShakeIcon &&
-      diceResultCard
-    ) {
-      btnRollAction.addEventListener("click", () => {
-        playHaptic(ImpactStyle.Light);
-        // Trigger shaking animation
-        diceShakeIcon.classList.add("active");
-        btnRollAction.disabled = true;
-        diceResultTotal.textContent = "...";
+    const renderArena = ({
+      animateIdsA = null,
+      animateIdsB = null,
+      popTotal = false,
+    } = {}) => {
+      if (!diceArena || !diceResultTotal || !diceResultCard) return;
+
+      // Clear previous roll sets while preserving the empty hint element
+      diceArena.querySelectorAll(".dice-roll-set").forEach((el) => el.remove());
+
+      if (dicePool.length === 0) {
+        diceArena.classList.remove("is-dual");
+        if (diceEmptyHint) diceEmptyHint.hidden = false;
+        diceResultTotal.textContent = "—";
         diceResultTotal.classList.remove("animate-pop");
-        diceResultBreakdown.textContent = "";
         diceResultCard.classList.remove("rolled");
+        return;
+      }
 
+      if (diceEmptyHint) diceEmptyHint.hidden = true;
+
+      const summary = getPoolSummary();
+      diceArena.classList.toggle("is-dual", summary.isDual);
+
+      if (!summary.isDual) {
+        diceArena.appendChild(
+          buildRollSetElement({
+            setKey: "A",
+            label: "Roll 1",
+            sum: summary.sumA,
+            values: dicePool.map((d) => d.rollA),
+            statusClass: "is-selected",
+            animateIds: animateIdsA,
+            showHeader: false,
+          }),
+        );
+      } else {
+        diceArena.appendChild(
+          buildRollSetElement({
+            setKey: "A",
+            label: "Roll 1",
+            sum: summary.sumA,
+            values: dicePool.map((d) => d.rollA),
+            statusClass: summary.aWins ? "is-selected" : "is-discarded",
+            animateIds: animateIdsA,
+            showHeader: true,
+          }),
+        );
+        diceArena.appendChild(
+          buildRollSetElement({
+            setKey: "B",
+            label: "Roll 2",
+            sum: summary.sumB,
+            values: dicePool.map((d) => d.rollB ?? d.rollA),
+            statusClass: summary.aWins ? "is-discarded" : "is-selected",
+            animateIds: animateIdsB,
+            showHeader: true,
+          }),
+        );
+      }
+
+      diceResultTotal.textContent = String(summary.winningSum);
+      diceResultCard.classList.add("rolled");
+      if (popTotal) {
+        diceResultTotal.classList.remove("animate-pop");
+        void diceResultTotal.offsetWidth;
+        diceResultTotal.classList.add("animate-pop");
+      }
+    };
+
+    const logCurrentRoll = (actionPrefix = "Rolled") => {
+      if (dicePool.length === 0) return;
+      const summary = getPoolSummary();
+      const notation = formatPoolNotation(dicePool);
+      const modeSuffix =
+        summary.mode === "best"
+          ? " (best of two)"
+          : summary.mode === "worst"
+            ? " (worst of two)"
+            : "";
+
+      announce(`${actionPrefix} ${notation}${modeSuffix}: ${summary.winningSum}`);
+
+      let progressionText = `Result: ${summary.winningSum}`;
+      if (summary.winningRolls.length > 1 && summary.winningRolls.length <= 5) {
+        progressionText += ` (${summary.winningRolls.join(" + ")})`;
+      }
+      if (summary.discardedSum != null) {
+        progressionText += ` · vs ${summary.discardedSum}`;
+      }
+      addHistoryLog(
+        { name: "Dice roll", color: "system" },
+        `${actionPrefix} ${notation}${modeSuffix}`,
+        progressionText,
+      );
+    };
+
+    // Populate Top 3D Dice Tray — tapping any die immediately rolls it into the arena
+    if (diceTray) {
+      diceTray.innerHTML = DICE_CATALOG.map(
+        (die) => `
+          <button
+            type="button"
+            class="dice-tray-btn"
+            data-sides="${die.sides}"
+            aria-label="Roll ${die.name}"
+          >
+            <span class="die-svg-wrap">${createDieSvg(die.sides, formatFaceValue(die.sides, null))}</span>
+            <span class="dice-tray-label">${die.label}</span>
+          </button>
+        `,
+      ).join("");
+
+      diceTray.addEventListener("click", (e) => {
+        const btn = e.target.closest(".dice-tray-btn");
+        if (!btn || isRolling || dicePool.length >= MAX_DICE) return;
+
+        const sides = parseInt(btn.dataset.sides, 10) || 6;
+        const mode = state.settings.diceMode || "exact";
+        const newDie = {
+          id: nextDieId++,
+          sides,
+          rollA: rollOne(sides),
+          rollB: mode === "exact" ? null : rollOne(sides),
+        };
+        dicePool.push(newDie);
+
+        const newIds = new Set([newDie.id]);
         playDiceSound();
+        playHaptic(ImpactStyle.Medium);
+        renderArena({
+          animateIdsA: newIds,
+          animateIdsB: mode === "exact" ? null : newIds,
+          popTotal: true,
+        });
+        syncControls();
+        logCurrentRoll("Rolled");
+      });
+    }
+
+    // Tap any die in the arena to remove it from the pool and recalculate
+    if (diceArena) {
+      diceArena.addEventListener("click", (e) => {
+        const chip = e.target.closest(".die-chip");
+        if (!chip || isRolling) return;
+        const id = parseInt(chip.dataset.dieId, 10);
+        dicePool = dicePool.filter((d) => d.id !== id);
+        playHaptic(ImpactStyle.Light);
+        playClickSound(520, 420, 0.05, 0.04);
+        renderArena();
+        syncControls();
+      });
+    }
+
+    // Roll Mode Segmented Control (Exact / Best of two / Worst of two)
+    if (diceModeGroup) {
+      const setDiceMode = (mode, { focus = false } = {}) => {
+        if (!VALID_DICE_MODES.includes(mode)) return;
+        const prevMode = state.settings.diceMode || "exact";
+        if (prevMode === mode) return;
+
+        let animateIdsB = null;
+        if (dicePool.length > 0) {
+          if (mode === "exact") {
+            // Keep the currently selected winning set when collapsing back to exact
+            const summary = getPoolSummary();
+            dicePool = dicePool.map((d) => ({
+              id: d.id,
+              sides: d.sides,
+              rollA: summary.aWins ? d.rollA : (d.rollB ?? d.rollA),
+              rollB: null,
+            }));
+          } else if (prevMode === "exact") {
+            // Roll companion second set immediately so both rolls are visible
+            dicePool = dicePool.map((d) => ({
+              ...d,
+              rollB: rollOne(d.sides),
+            }));
+            animateIdsB = new Set(dicePool.map((d) => d.id));
+            playDiceSound();
+          }
+        }
+
+        state.settings.diceMode = mode;
+        saveSettings();
+        syncModeButtons();
+        renderArena({ animateIdsB, popTotal: dicePool.length > 0 });
+        syncControls();
+        playHaptic(ImpactStyle.Light);
+        playClickSound(620, 520, 0.05, 0.04);
+        if (focus) {
+          diceModeGroup
+            .querySelector(`.dice-mode-btn[data-dice-mode="${mode}"]`)
+            ?.focus();
+        }
+      };
+
+      diceModeGroup.addEventListener("click", (e) => {
+        const btn = e.target.closest(".dice-mode-btn");
+        if (!btn) return;
+        setDiceMode(btn.dataset.diceMode);
+      });
+
+      diceModeGroup.addEventListener("keydown", (e) => {
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+        e.preventDefault();
+        const curIdx = VALID_DICE_MODES.indexOf(
+          state.settings.diceMode || "exact",
+        );
+        const delta = e.key === "ArrowRight" ? 1 : -1;
+        const nextIdx =
+          (curIdx + delta + VALID_DICE_MODES.length) % VALID_DICE_MODES.length;
+        setDiceMode(VALID_DICE_MODES[nextIdx], { focus: true });
+      });
+    }
+
+    // Reroll all dice currently in the arena
+    if (btnRollAction) {
+      btnRollAction.addEventListener("click", () => {
+        if (isRolling || dicePool.length === 0) return;
+
+        isRolling = true;
+        playHaptic(ImpactStyle.Light);
+        playDiceSound();
+        syncControls();
+
+        const prefersReduced = window.matchMedia(
+          "(prefers-reduced-motion: reduce)",
+        ).matches;
+        const delayMs = prefersReduced ? 0 : 240;
 
         setTimeout(() => {
-          diceShakeIcon.classList.remove("active");
+          const mode = state.settings.diceMode || "exact";
+          dicePool = dicePool.map((d) => ({
+            ...d,
+            rollA: rollOne(d.sides),
+            rollB: mode === "exact" ? null : rollOne(d.sides),
+          }));
+          const allIds = new Set(dicePool.map((d) => d.id));
+          isRolling = false;
 
-          let total = 0;
-          const rolls = [];
-          for (let i = 0; i < currentDiceCount; i++) {
-            const roll = Math.floor(Math.random() * currentDiceType) + 1;
-            rolls.push(roll);
-            total += roll;
-          }
+          renderArena({
+            animateIdsA: allIds,
+            animateIdsB: mode === "exact" ? null : allIds,
+            popTotal: true,
+          });
+          syncControls();
+          logCurrentRoll("Rerolled");
 
-          // State 2: Roll Result
-          diceResultTotal.textContent = total;
-          diceResultTotal.classList.add("animate-pop");
-          rolledDice = `${currentDiceCount}d${currentDiceType}`;
-          diceResultCard.classList.add("rolled");
-          announce(`Rolled ${rolledDice}: ${total}`);
-
-          if (currentDiceCount > 1) {
-            diceResultBreakdown.textContent = `(${rolls.join(" + ")})`;
-          } else {
-            diceResultBreakdown.textContent = "";
-          }
-
-          // Log dice roll to history
-          let progressionText = `Result: ${total}`;
-          if (currentDiceCount > 1 && currentDiceCount <= 5) {
-            progressionText += ` (${rolls.join(" + ")})`;
-          }
-          addHistoryLog(
-            { name: "Dice roll", color: "system" },
-            `Rolled ${currentDiceCount}d${currentDiceType}`,
-            progressionText,
-          );
-
-          btnRollAction.disabled = false;
           playClickSound(600, 800, 0.08, 0.05);
           playHaptic(ImpactStyle.Medium);
-        }, 400);
+        }, delayMs);
       });
     }
+
+    // Clear all dice from the arena
+    if (btnDiceClear) {
+      btnDiceClear.addEventListener("click", () => {
+        if (isRolling || dicePool.length === 0) return;
+        dicePool = [];
+        playHaptic(ImpactStyle.Light);
+        playClickSound(460, 360, 0.06, 0.04);
+        renderArena();
+        syncControls();
+      });
+    }
+
+    // Initial render
+    syncModeButtons();
+    renderArena();
+    syncControls();
 
     // 2. Stopwatch & Countdown Timer
     const swStart = $("#btn-timer-placeholder-start");
@@ -4537,21 +5039,34 @@ import { log } from "./logger.js";
     const promptTitle = $("#picker-prompt-title");
     const promptSubtitle = $("#picker-prompt-subtitle");
     const statusEl = $("#picker-status");
+    const modeBtn = $("#header-picker-mode");
+    const modeText = $("#header-picker-mode-text");
     const tabsSlider = $("#tabs-slider");
     if (!stage || !circlesLayer) return;
 
     const PICKER_COUNTDOWN_MS = 3000;
-    const PICKER_MIN_FINGERS = 2;
     const PICKER_EXPLOSION_STAGGER_MS = 140;
+    const PICKER_TEAM_REVEAL_STAGGER_MS = 180;
     const PICKER_PARTICLE_COUNT = 14;
+    const PICKER_TEAM_SPARKLE_COUNT = 10;
     const ROTATION_MIN_DEG_PER_SEC = 36;
     // Stay below 60Hz/120Hz wagon-wheel stroboscopic harmonics (e.g. 5x14.4°=72° at 864°/s)
     const ROTATION_MAX_DEG_PER_SEC = 500;
     const ROTATION_SETTLED_DEG_PER_SEC = 24;
+    const PICKER_FOLLOW_SLACK_PX = 12;
     const SWIPE_TRIGGER_PX = 64;
     const SWIPE_FLICK_PX = 36;
     const SWIPE_FLICK_VELOCITY = 0.3; // px/ms
     const SWIPE_AXIS_RATIO = 1.5;
+
+    // Mode configuration — teamCount is parameterized for downstream multi-team support
+    const pickerConfig = {
+      mode: "single", // 'single' | 'teams'
+      teamCount: 2,
+    };
+
+    const getMinFingers = () =>
+      pickerConfig.mode === "teams" ? Math.max(2, pickerConfig.teamCount) : 2;
 
     let phase = "idle"; // 'idle' | 'waiting' | 'counting' | 'eliminating' | 'selected'
     const touches = new Map(); // pointerId -> { x, y, color, slot, shape, shapeSlot, angle, direction, el }
@@ -4559,6 +5074,8 @@ import { log } from "./logger.js";
     let swipeCandidate = null; // { pointerId, startX, startY, startTime }
     let roundColorOrder = [];
     let roundShapeOrder = [];
+    let lastChordName = null;
+    let roundChord = null;
     let fallbackColorIndex = 0;
     let fallbackShapeIndex = 0;
     let nextDirection = 1;
@@ -4606,6 +5123,7 @@ import { log } from "./logger.js";
         countdownTimer = null;
       }
       countdownStartedAt = null;
+      resetPickerChordSwell();
     };
 
     const clearEliminationTimers = () => {
@@ -4665,29 +5183,60 @@ import { log } from "./logger.js";
       rotationRaf = requestAnimationFrame(stepRotation);
     };
 
+    const updateModeUI = () => {
+      const isTeams = pickerConfig.mode === "teams";
+      const label = isTeams ? `${pickerConfig.teamCount} teams` : "Pick 1";
+      stage.dataset.mode = pickerConfig.mode;
+      stage.dataset.teamCount = String(pickerConfig.teamCount);
+      if (modeText) modeText.textContent = label;
+      if (modeBtn) {
+        modeBtn.setAttribute("aria-label", `Picker mode: ${label}`);
+        modeBtn.classList.toggle("is-locked", phase !== "idle");
+      }
+    };
+
     const updatePrompt = () => {
       if (!promptEl) return;
+      const isTeams = pickerConfig.mode === "teams";
+      const minFingers = getMinFingers();
       if (phase === "idle") {
         promptEl.classList.remove("hidden");
-        if (promptTitle) promptTitle.textContent = "Place fingers to choose";
+        if (promptTitle) {
+          promptTitle.textContent = isTeams
+            ? `Place fingers for ${pickerConfig.teamCount} teams`
+            : "Place fingers to choose";
+        }
         if (promptSubtitle) {
           promptSubtitle.textContent = hasTouchInput()
-            ? "2 or more players"
+            ? `${minFingers} or more players`
             : "Needs a touchscreen";
         }
       } else if (phase === "waiting") {
         promptEl.classList.remove("hidden");
-        if (promptTitle) promptTitle.textContent = "Waiting for another player";
+        if (promptTitle) {
+          promptTitle.textContent =
+            minFingers > 2 ? "Waiting for more players" : "Waiting for another player";
+        }
         if (promptSubtitle) promptSubtitle.textContent = "Hold to choose";
       } else {
         promptEl.classList.add("hidden");
       }
     };
 
+    const selectRoundChord = () => {
+      const bank = getPickerChordBank();
+      const candidates = bank.filter((chord) => chord.name !== lastChordName);
+      roundChord = candidates[Math.floor(Math.random() * candidates.length)];
+      lastChordName = roundChord.name;
+      stage.dataset.chord = roundChord.name;
+      stage.dataset.instrument = getActivePickerInstrument().id;
+    };
+
     const shuffleRoundPools = () => {
       const activePalette = palettes[state.settings.palette] || palettes.bold;
       roundColorOrder = shuffleIndices(activePalette.colors.length);
       roundShapeOrder = shuffleIndices(PICKER_SHAPES.length);
+      selectRoundChord();
       fallbackColorIndex = 0;
       fallbackShapeIndex = 0;
       nextDirection = 1;
@@ -4724,30 +5273,95 @@ import { log } from "./logger.js";
       return { shape: PICKER_SHAPES[fallbackSlot], shapeSlot: null };
     };
 
-    const positionCircle = (entry, clientX, clientY) => {
+    const allocateNote = () => {
+      if (!roundChord) selectRoundChord();
+      const usedNoteSlots = new Set();
+      touches.forEach((entry) => {
+        if (typeof entry.noteSlot === "number") usedNoteSlots.add(entry.noteSlot);
+      });
+      let noteSlot = 0;
+      while (usedNoteSlots.has(noteSlot)) noteSlot++;
+      const notes = roundChord.notes;
+      const octaveBoost = Math.floor(noteSlot / notes.length) * 12;
+      const midi = Math.min(96, notes[noteSlot % notes.length] + octaveBoost);
+      return { midi, noteSlot };
+    };
+
+    const positionCircle = (entry, clientX, clientY, { follow = false } = {}) => {
       const rect = stage.getBoundingClientRect();
-      entry.x = clientX - rect.left;
-      entry.y = clientY - rect.top;
+      const fingerX = clientX - rect.left;
+      const fingerY = clientY - rect.top;
+      if (follow) {
+        // A held finger's reported point wanders a few px, and jumps when another
+        // finger lands. Keep the shape anchored until the finger pulls it past a
+        // short leash, then drag it along so it never snaps.
+        const dx = fingerX - entry.x;
+        const dy = fingerY - entry.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist <= PICKER_FOLLOW_SLACK_PX) return;
+        const pull = (dist - PICKER_FOLLOW_SLACK_PX) / dist;
+        entry.x += dx * pull;
+        entry.y += dy * pull;
+      } else {
+        entry.x = fingerX;
+        entry.y = fingerY;
+      }
       entry.el.style.setProperty("--x", `${entry.x}px`);
       entry.el.style.setProperty("--y", `${entry.y}px`);
     };
 
-    const spawnGeometricExplosion = (entry) => {
+    const spawnShockwave = (entry, color) => {
       if (!particlesLayer || prefersReducedMotion()) return;
-      const shapeDef = PICKER_SHAPES.find((s) => s.name === entry.shape) || PICKER_SHAPES[0];
+      const ring = document.createElement("div");
+      ring.className = "picker-shockwave";
+      ring.dataset.color = color;
+      ring.style.setProperty("--shockwave-color", color);
+      particlesLayer.appendChild(ring);
 
-      for (let i = 0; i < PICKER_PARTICLE_COUNT; i++) {
+      if (typeof ring.animate === "function") {
+        const anim = ring.animate(
+          [
+            {
+              transform: `translate3d(${entry.x - 56}px, ${entry.y - 56}px, 0) scale(0.65)`,
+              opacity: 0.9,
+            },
+            {
+              transform: `translate3d(${entry.x - 56}px, ${entry.y - 56}px, 0) scale(2.15)`,
+              opacity: 0,
+            },
+          ],
+          {
+            duration: 420,
+            easing: "cubic-bezier(0.16, 1, 0.3, 1)",
+            fill: "forwards",
+          },
+        );
+        anim.onfinish = () => ring.remove();
+        anim.oncancel = () => ring.remove();
+      } else {
+        ring.remove();
+      }
+    };
+
+    const spawnGeometricExplosion = (
+      entry,
+      { count = PICKER_PARTICLE_COUNT, color = entry.color, shape = entry.shape } = {},
+    ) => {
+      if (!particlesLayer || prefersReducedMotion()) return;
+      const shapeDef = PICKER_SHAPES.find((s) => s.name === shape) || PICKER_SHAPES[0];
+
+      for (let i = 0; i < count; i++) {
         const particle = document.createElement("div");
         particle.className = "picker-particle";
-        particle.dataset.color = entry.color;
+        particle.dataset.color = color;
         particle.dataset.shape = shapeDef.name;
         const size = 12 + Math.round(Math.random() * 14);
-        particle.style.setProperty("--particle-color", entry.color);
+        particle.style.setProperty("--particle-color", color);
         particle.style.setProperty("--particle-size", `${size}px`);
         particle.innerHTML = `<svg aria-hidden="true" viewBox="0 0 100 100">${shapeDef.markup}</svg>`;
         particlesLayer.appendChild(particle);
 
-        const baseAngle = (Math.PI * 2 * i) / PICKER_PARTICLE_COUNT;
+        const baseAngle = (Math.PI * 2 * i) / count;
         const angle = baseAngle + (Math.random() - 0.5) * 0.45;
         const distance = 70 + Math.random() * 85;
         const endX = entry.x + Math.cos(angle) * distance;
@@ -4780,6 +5394,11 @@ import { log } from "./logger.js";
       }
     };
 
+    const stopAllPickerVoices = (fadeSec = 0.12) => {
+      touches.forEach((entry) => entry.voice?.stop(fadeSec));
+      resetPickerChordSwell();
+    };
+
     const finalizeWinner = (winnerId) => {
       const winner = touches.get(winnerId);
       if (!winner) {
@@ -4799,7 +5418,9 @@ import { log } from "./logger.js";
         winnerBgEl.classList.add("active");
       }
 
+      stopAllPickerVoices(0.22);
       playPickerHaptic("major");
+      playPickerResolve(roundChord);
       if (statusEl) {
         const activePalette = palettes[state.settings.palette] || palettes.bold;
         const colorName = winner.slot !== null ? activePalette.names?.[winner.slot] : null;
@@ -4808,22 +5429,130 @@ import { log } from "./logger.js";
           : `${winner.shape[0].toUpperCase()}${winner.shape.slice(1)} selected`;
       }
       updatePrompt();
+      updateModeUI();
+    };
+
+    const assignTeams = (ids, teamCount) => {
+      const activePalette = palettes[state.settings.palette] || palettes.bold;
+      const shuffledIds = [...ids];
+      for (let i = shuffledIds.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffledIds[i], shuffledIds[j]] = [shuffledIds[j], shuffledIds[i]];
+      }
+
+      const teamOrder = shuffleIndices(teamCount);
+      const teams = Array.from({ length: teamCount }, (_, t) => {
+        const colorSlot = roundColorOrder[t];
+        const color =
+          colorSlot !== undefined && activePalette.colors[colorSlot]
+            ? activePalette.colors[colorSlot]
+            : `hsl(${Math.round(((t + 1) * 137.508) % 360)} 78% 54%)`;
+        const shapeSlot = roundShapeOrder[t % roundShapeOrder.length];
+        const shape = PICKER_SHAPES[shapeSlot] || PICKER_SHAPES[t % PICKER_SHAPES.length];
+        return { teamIndex: t, color, shape, memberIds: [] };
+      });
+
+      shuffledIds.forEach((id, i) => {
+        const targetTeam = teamOrder[i % teamCount];
+        teams[targetTeam].memberIds.push(id);
+      });
+
+      return teams;
+    };
+
+    const applyTeamToEntry = (entry, team, withEffects) => {
+      entry.color = team.color;
+      entry.shape = team.shape.name;
+      entry.direction = team.teamIndex % 2 === 0 ? 1 : -1;
+      entry.el.dataset.team = String(team.teamIndex);
+      entry.el.dataset.color = team.color;
+      entry.el.dataset.shape = team.shape.name;
+      entry.el.style.setProperty("--circle-color", team.color);
+      entry.el.innerHTML = `<svg class="picker-shape" aria-hidden="true" viewBox="0 0 100 100">${team.shape.markup}</svg>`;
+      entry.el.classList.add("is-team-revealed");
+      if (withEffects) {
+        spawnShockwave(entry, team.color);
+        spawnGeometricExplosion(entry, {
+          count: PICKER_TEAM_SPARKLE_COUNT,
+          color: team.color,
+          shape: team.shape.name,
+        });
+      }
+    };
+
+    const selectPickerTeams = (ids) => {
+      const teamCount = Math.max(2, pickerConfig.teamCount);
+      const teams = assignTeams(ids, teamCount);
+
+      if (prefersReducedMotion()) {
+        teams.forEach((team) => {
+          team.memberIds.forEach((id) => {
+            const entry = touches.get(id);
+            if (entry) applyTeamToEntry(entry, team, false);
+          });
+        });
+        phase = "selected";
+        stopAllPickerVoices(0.22);
+        playPickerHaptic("major");
+        playPickerResolve(roundChord);
+        if (statusEl) statusEl.textContent = `${teamCount} teams selected`;
+        updatePrompt();
+        updateModeUI();
+        return;
+      }
+
+      phase = "eliminating";
+      clearEliminationTimers();
+
+      teams.forEach((team, waveIndex) => {
+        const timerId = setTimeout(() => {
+          team.memberIds.forEach((id) => {
+            const entry = touches.get(id);
+            if (entry) applyTeamToEntry(entry, team, true);
+          });
+          if (waveIndex < teams.length - 1) {
+            playPickerHaptic("minor");
+            if (roundChord) {
+              playPickerNote(
+                roundChord.notes[waveIndex % roundChord.notes.length],
+                { duration: 0.45, vol: 0.065 },
+              );
+            }
+          } else {
+            phase = "selected";
+            stopAllPickerVoices(0.22);
+            playPickerHaptic("major");
+            playPickerResolve(roundChord);
+            if (statusEl) statusEl.textContent = `${teamCount} teams selected`;
+            updatePrompt();
+            updateModeUI();
+          }
+        }, waveIndex * PICKER_TEAM_REVEAL_STAGGER_MS);
+        eliminationTimers.push(timerId);
+      });
     };
 
     const selectPickerWinner = () => {
       countdownTimer = null;
       countdownStartedAt = null;
       const ids = Array.from(touches.keys());
-      if (ids.length < PICKER_MIN_FINGERS) {
-        phase = ids.length === 1 ? "waiting" : "idle";
+      const minFingers = getMinFingers();
+      if (ids.length < minFingers) {
+        phase = ids.length > 0 ? "waiting" : "idle";
         updatePrompt();
+        updateModeUI();
+        return;
+      }
+
+      heldPointers.clear();
+      ids.forEach((id) => heldPointers.add(id));
+
+      if (pickerConfig.mode === "teams") {
+        selectPickerTeams(ids);
         return;
       }
 
       const winnerId = ids[Math.floor(Math.random() * ids.length)];
-      heldPointers.clear();
-      ids.forEach((id) => heldPointers.add(id));
-
       const loserIds = ids.filter((id) => id !== winnerId);
       // Shuffle elimination order so defeated shapes pop in a fresh order
       for (let i = loserIds.length - 1; i > 0; i--) {
@@ -4835,6 +5564,7 @@ import { log } from "./logger.js";
         loserIds.forEach((id) => {
           const entry = touches.get(id);
           if (entry) {
+            entry.voice?.stop(0.05);
             entry.el.remove();
             touches.delete(id);
           }
@@ -4850,9 +5580,11 @@ import { log } from "./logger.js";
         const timerId = setTimeout(() => {
           const entry = touches.get(id);
           if (!entry) return;
+          entry.voice?.stop(0.05);
           entry.el.remove();
           touches.delete(id);
           spawnGeometricExplosion(entry);
+          playPickerPop(entry.midi);
         }, index * PICKER_EXPLOSION_STAGGER_MS);
         eliminationTimers.push(timerId);
       });
@@ -4867,6 +5599,7 @@ import { log } from "./logger.js";
       clearCountdown();
       countdownStartedAt = performance.now();
       countdownTimer = setTimeout(selectPickerWinner, PICKER_COUNTDOWN_MS);
+      schedulePickerChordSwell(PICKER_COUNTDOWN_MS);
       if (!prefersReducedMotion()) {
         stage.dataset.rotationSpeed = ROTATION_MIN_DEG_PER_SEC.toFixed(1);
       }
@@ -4876,10 +5609,14 @@ import { log } from "./logger.js";
       clearCountdown();
       clearEliminationTimers();
       stopRotationLoop();
+      stopAllPickerVoices(0.06);
       touches.forEach((entry) => entry.el.remove());
       touches.clear();
       heldPointers.clear();
       swipeCandidate = null;
+      roundChord = null;
+      delete stage.dataset.chord;
+      delete stage.dataset.instrument;
       phase = "idle";
       setSliderLocked(false);
       if (particlesLayer) particlesLayer.innerHTML = "";
@@ -4893,6 +5630,7 @@ import { log } from "./logger.js";
       }
       if (statusEl) statusEl.textContent = "";
       updatePrompt();
+      updateModeUI();
     };
 
     const trySingleFingerSwipe = (e, isRelease = false) => {
@@ -4922,16 +5660,49 @@ import { log } from "./logger.js";
       return true;
     };
 
+    let nextLabVirtualId = -1;
+    let labDemoTimers = [];
+    const clearLabDemoTimers = () => {
+      labDemoTimers.forEach((t) => clearTimeout(t));
+      labDemoTimers = [];
+    };
+
     const addPickerTouch = (e) => {
       if (state.currentTab !== "picker") return;
       if (e.pointerType === "mouse" && e.button !== 0) return;
-      if (phase === "eliminating" || phase === "selected" || touches.has(e.pointerId)) return;
-      e.stopPropagation();
 
-      try {
-        stage.setPointerCapture(e.pointerId);
-      } catch {
-        /* ignore */
+      // In ?lab=1 mode on a laptop, mouse clicks pin/unpin virtual touch points
+      // so multi-finger Picker rounds can be played with a single mouse/trackpad
+      let pointerId = e.pointerId;
+      const isPinnedLabClick = isLabMode && e.pointerType === "mouse";
+      if (isPinnedLabClick) {
+        clearLabDemoTimers();
+        if (phase === "selected") {
+          resetPicker();
+          return;
+        }
+        if (phase === "eliminating") return;
+        const rect = stage.getBoundingClientRect();
+        const relX = e.clientX - rect.left;
+        const relY = e.clientY - rect.top;
+        for (const [id, existing] of touches.entries()) {
+          if (id < 0 && Math.hypot(existing.x - relX, existing.y - relY) <= 56) {
+            removePickerTouch({ pointerId: id, type: "pointercancel" });
+            return;
+          }
+        }
+        pointerId = nextLabVirtualId--;
+      }
+
+      if (phase === "eliminating" || phase === "selected" || touches.has(pointerId)) return;
+      e.stopPropagation?.();
+
+      if (pointerId >= 0) {
+        try {
+          stage.setPointerCapture(pointerId);
+        } catch {
+          /* ignore */
+        }
       }
 
       const wasIdle = phase === "idle";
@@ -4942,11 +5713,13 @@ import { log } from "./logger.js";
 
       const { color, slot } = allocateColor();
       const { shape, shapeSlot } = allocateShape();
+      const { midi, noteSlot } = allocateNote();
       const el = document.createElement("div");
       el.className = "picker-circle";
-      el.dataset.pointerId = String(e.pointerId);
+      el.dataset.pointerId = String(pointerId);
       el.dataset.color = color;
       el.dataset.shape = shape.name;
+      el.dataset.note = String(midi);
       el.style.setProperty("--circle-color", color);
       el.style.setProperty("--rot", "0deg");
       el.innerHTML = `<svg class="picker-shape" aria-hidden="true" viewBox="0 0 100 100">${shape.markup}</svg>`;
@@ -4954,6 +5727,7 @@ import { log } from "./logger.js";
 
       const direction = nextDirection;
       nextDirection = -nextDirection;
+      const voice = startPickerVoice(midi);
       const entry = {
         x: 0,
         y: 0,
@@ -4961,39 +5735,45 @@ import { log } from "./logger.js";
         slot,
         shape: shape.name,
         shapeSlot,
+        midi,
+        noteSlot,
+        voice,
         angle: 0,
         direction,
         el,
       };
       positionCircle(entry, e.clientX, e.clientY);
-      touches.set(e.pointerId, entry);
+      touches.set(pointerId, entry);
 
       playPickerHaptic("minor");
 
-      if (touches.size >= PICKER_MIN_FINGERS) {
+      if (touches.size >= getMinFingers()) {
         swipeCandidate = null;
         phase = "counting";
         schedulePickerSelection();
       } else {
         phase = "waiting";
-        if (wasIdle) {
+        if (wasIdle && !isPinnedLabClick) {
           swipeCandidate = {
-            pointerId: e.pointerId,
+            pointerId,
             startX: e.clientX,
             startY: e.clientY,
             startTime: performance.now(),
           };
+        } else {
+          swipeCandidate = null;
         }
       }
       startRotationLoop();
       updatePrompt();
+      updateModeUI();
     };
 
     const movePickerTouch = (e) => {
       if (trySingleFingerSwipe(e, false)) return;
       const entry = touches.get(e.pointerId);
       if (!entry) return;
-      positionCircle(entry, e.clientX, e.clientY);
+      positionCircle(entry, e.clientX, e.clientY, { follow: true });
     };
 
     const removePickerTouch = (e) => {
@@ -5010,17 +5790,18 @@ import { log } from "./logger.js";
 
       const entry = touches.get(e.pointerId);
       if (!entry) return;
+      entry.voice?.stop(0.12);
       entry.el.remove();
       touches.delete(e.pointerId);
       if (swipeCandidate?.pointerId === e.pointerId) {
         swipeCandidate = null;
       }
 
-      if (touches.size >= PICKER_MIN_FINGERS) {
+      if (touches.size >= getMinFingers()) {
         phase = "counting";
         schedulePickerSelection();
         updatePrompt();
-      } else if (touches.size === 1) {
+      } else if (touches.size > 0) {
         clearCountdown();
         phase = "waiting";
         if (!prefersReducedMotion()) {
@@ -5032,6 +5813,19 @@ import { log } from "./logger.js";
       }
     };
 
+    if (modeBtn) {
+      modeBtn.addEventListener("click", () => {
+        if (state.currentTab !== "picker" || phase !== "idle") return;
+        pickerConfig.mode = pickerConfig.mode === "single" ? "teams" : "single";
+        playSelectionHaptic();
+        updateModeUI();
+        updatePrompt();
+      });
+    }
+
+    updateModeUI();
+    updatePrompt();
+
     stage.addEventListener("pointerdown", addPickerTouch);
     stage.addEventListener("pointermove", movePickerTouch);
     stage.addEventListener("pointerup", removePickerTouch);
@@ -5040,14 +5834,41 @@ import { log } from "./logger.js";
 
     document.addEventListener("visibilitychange", () => {
       if (document.hidden && phase !== "idle") {
-        resetPicker();
+        resetPicker({ immediate: true });
       }
     });
-    window.addEventListener("blur", () => {
-      if (phase !== "idle") {
-        resetPicker();
-      }
-    });
+    if (!isLabMode) {
+      window.addEventListener("blur", () => {
+        if (phase !== "idle") {
+          resetPicker({ immediate: true });
+        }
+      });
+    }
+    if (isLabMode) {
+      stage.__simulateLabFingers = (count = 5) => {
+        clearLabDemoTimers();
+        resetPicker({ immediate: true });
+        const rect = stage.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const rx = Math.max(70, Math.min(rect.width * 0.3, 130));
+        const ry = Math.max(80, Math.min(rect.height * 0.3, 165));
+        const total = Math.max(2, Math.min(8, count));
+        for (let i = 0; i < total; i++) {
+          const angle = -Math.PI / 2 + (i * 2 * Math.PI) / total;
+          const tId = setTimeout(() => {
+            addPickerTouch({
+              pointerId: nextLabVirtualId--,
+              pointerType: "touch",
+              button: 0,
+              clientX: Math.round(cx + Math.cos(angle) * rx),
+              clientY: Math.round(cy + Math.sin(angle) * ry),
+            });
+          }, i * 130);
+          labDemoTimers.push(tId);
+        }
+      };
+    }
     updatePrompt();
   };
 
@@ -5130,20 +5951,116 @@ import { log } from "./logger.js";
     });
 
     // Web: another tab changed saved state. Reload it, otherwise our stale copy
-    // overwrites theirs on the next save. (Never fires on native.)
-    window.addEventListener("storage", async (e) => {
-      if (e.key !== null && !/counters-(list|settings|history)$/.test(e.key)) {
-        return;
-      }
-      await loadStateFromStorage();
-      document.documentElement.setAttribute("data-layout", state.settings.layout);
-      syncThemeSetting();
-      renderPaletteSetting();
-      renderEditPaletteSwatches();
-      populateCalculatorQuickAdds();
-      renderCountersList();
-      renderHistory();
-    });
+    // overwrites theirs on the next save. (Never fires on native or in lab mode.)
+    if (!isLabMode) {
+      window.addEventListener("storage", async (e) => {
+        if (e.key !== null && !/counters-(list|settings|history)$/.test(e.key)) {
+          return;
+        }
+        await loadStateFromStorage();
+        document.documentElement.setAttribute("data-layout", state.settings.layout);
+        syncThemeSetting();
+        renderPaletteSetting();
+        renderEditPaletteSwatches();
+        populateCalculatorQuickAdds();
+        renderCountersList();
+        renderHistory();
+      });
+    }
+
+    if (isLabMode) {
+      window.__countersLab = {
+        getState: () => state,
+        sync({
+          paletteKey,
+          paletteDef,
+          instrumentDef,
+          counters,
+          layout,
+          theme,
+          themeHue,
+          soundEnabled,
+          previewChime = false,
+        } = {}) {
+          if (
+            activeLabCandidateKey &&
+            !PALETTES[activeLabCandidateKey] &&
+            activeLabCandidateKey !== paletteKey
+          ) {
+            delete palettes[activeLabCandidateKey];
+            delete PALETTE_INSTRUMENTS[activeLabCandidateKey];
+            activeLabCandidateKey = null;
+          }
+          if (paletteKey && paletteDef && !PALETTES[paletteKey]) {
+            palettes[paletteKey] = paletteDef;
+            if (instrumentDef) PALETTE_INSTRUMENTS[paletteKey] = instrumentDef;
+            activeLabCandidateKey = paletteKey;
+          } else if (paletteKey && PALETTES[paletteKey] && instrumentDef) {
+            PALETTE_INSTRUMENTS[paletteKey] = instrumentDef;
+          }
+          if (paletteKey && palettes[paletteKey]) {
+            state.settings.palette = paletteKey;
+          }
+          if (typeof soundEnabled === "boolean") {
+            state.settings.soundEnabled = soundEnabled;
+            const soundCheckbox = $("#setting-sound");
+            if (soundCheckbox) soundCheckbox.checked = soundEnabled;
+          }
+          if (theme && ["dark", "light", "system"].includes(theme)) {
+            state.settings.theme = theme;
+            applyTheme(theme);
+          }
+          if (typeof themeHue === "number") {
+            state.settings.themeHue = themeHue;
+            applyAccentTokens(themeHue);
+            const hueInput = $("#setting-theme-hue");
+            if (hueInput) hueInput.value = String(themeHue);
+          }
+          if (layout && ["grid", "list"].includes(layout)) {
+            state.settings.layout = layout;
+            document.documentElement.setAttribute("data-layout", layout);
+          }
+          if (Array.isArray(counters)) {
+            state.counters = counters.map((c) => ({ ...c }));
+          }
+          syncThemeSetting();
+          renderPaletteSetting();
+          renderEditPaletteSwatches();
+          renderCountersList();
+          if (state.activeCounterIdForCalc && $("#calculator-dialog")?.open) {
+            const c = state.counters.find(
+              (item) => item.id === state.activeCounterIdForCalc,
+            );
+            if (c) setSheetTheme($("#calculator-dialog"), getCounterHex(c));
+          }
+          if (state.activeCounterIdForEdit && $("#edit-counter-dialog")?.open) {
+            const c = state.counters.find(
+              (item) => item.id === state.activeCounterIdForEdit,
+            );
+            if (c) setSheetTheme($("#edit-counter-dialog"), getCounterHex(c));
+          }
+          if (previewChime) {
+            playPickerInstrumentPreview();
+          }
+        },
+        audition(kind) {
+          if (kind === "chime") {
+            playPickerInstrumentPreview();
+          } else if (kind === "chord") {
+            const bank = getPickerChordBank();
+            playPickerResolve(bank[Math.floor(Math.random() * bank.length)]);
+          } else if (kind === "pop") {
+            playPickerPop(64);
+          }
+        },
+        simulatePicker(count = 5) {
+          switchTab("picker");
+          requestAnimationFrame(() => {
+            $("#picker-stage")?.__simulateLabFingers?.(count);
+          });
+        },
+      };
+    }
 
     // Set dynamic version from package.json via Vite define injection
     const appVersion =
@@ -5160,24 +6077,26 @@ import { log } from "./logger.js";
       versionEl.textContent = `Counters v${appVersion}`;
     }
 
-    // Register right away instead of waiting for window load, which a stalled
-    // third-party request (e.g. analytics) can delay indefinitely
-    registerSW({
-      immediate: true,
-      onOfflineReady() {
-        log.info("App ready to work offline");
-      },
-      onRegistered(reg) {
-        if (!reg) return;
-        document.addEventListener("visibilitychange", () => {
-          if (document.visibilityState === "visible") {
-            reg.update().catch(() => {
-              /* ignore when offline */
-            });
-          }
-        });
-      },
-    });
+    if (!isLabMode) {
+      // Register right away instead of waiting for window load, which a stalled
+      // third-party request (e.g. analytics) can delay indefinitely
+      registerSW({
+        immediate: true,
+        onOfflineReady() {
+          log.info("App ready to work offline");
+        },
+        onRegistered(reg) {
+          if (!reg) return;
+          document.addEventListener("visibilitychange", () => {
+            if (document.visibilityState === "visible") {
+              reg.update().catch(() => {
+                /* ignore when offline */
+              });
+            }
+          });
+        },
+      });
+    }
   };
 
   // Bootstrap when DOM ready
