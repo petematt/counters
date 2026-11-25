@@ -278,6 +278,7 @@ import { log } from "./logger.js";
       themeHue: 205,
       keepAwake: false,
       palette: "bold",
+      diceMode: "exact",
     },
     history: [],
     currentTab: "counters",
@@ -527,6 +528,37 @@ import { log } from "./logger.js";
     if (whiteContrast >= 4.5) return "#ffffff";
     // Otherwise (light custom colors) use pure black, which beats near-black.
     return whiteContrast >= contrastRatio(hex, "#000000") ? "#ffffff" : "#000000";
+  };
+
+  // Dice catalog mapped 1:1 to the 8 slots of the active palette
+  const DICE_CATALOG = [
+    { sides: 2, label: "d2", name: "Coin (d2)" },
+    { sides: 4, label: "d4", name: "d4" },
+    { sides: 6, label: "d6", name: "d6" },
+    { sides: 8, label: "d8", name: "d8" },
+    { sides: 10, label: "d10", name: "d10" },
+    { sides: 12, label: "d12", name: "d12" },
+    { sides: 20, label: "d20", name: "d20" },
+    { sides: 100, label: "d100", name: "d100" },
+  ];
+
+  // Sync 3D faceted SVG die color tokens on #tab-dice from the active palette
+  const applyDicePalette = () => {
+    const tabDice = $("#tab-dice");
+    if (!tabDice) return;
+    const swatches = getSwatches();
+    DICE_CATALOG.forEach((die, idx) => {
+      const hex = swatches[idx % swatches.length]?.hex || "#38bdf8";
+      const light = mixHex(hex, "#ffffff", 0.24);
+      const dark = mixHex(hex, "#000000", 0.28);
+      const ink = getReadableTextColor(hex);
+      const edge = mixHex(hex, "#000000", 0.42);
+      tabDice.style.setProperty(`--die-c-${die.sides}`, hex);
+      tabDice.style.setProperty(`--die-c-${die.sides}-light`, light);
+      tabDice.style.setProperty(`--die-c-${die.sides}-dark`, dark);
+      tabDice.style.setProperty(`--die-c-${die.sides}-ink`, ink);
+      tabDice.style.setProperty(`--die-c-${die.sides}-edge`, edge);
+    });
   };
 
   // Helper: Convert #rrggbb to { h, s, l } (0-360, 0-100, 0-100)
@@ -3412,6 +3444,7 @@ import { log } from "./logger.js";
       renderPaletteSetting();
       renderEditPaletteSwatches();
       renderCountersList();
+      applyDicePalette();
       playClickSound();
       playSelectionHaptic();
       if (focus) {
@@ -3973,145 +4006,556 @@ import { log } from "./logger.js";
   // 18. Placeholders Interactive Actions (Extra Premium Polish!)
   // ------------------------------------------------------------------------
   const setupPlaceholdersInteractions = () => {
-    // 1. Redesigned Dice Roller
-    const diceShakeIcon = $("#dice-shake-icon");
-    const diceTypeSelector = $("#dice-type-selector");
-    const diceCountDisplay = $("#dice-count-display");
-    const btnDiceMinus = $("#btn-dice-minus");
-    const btnDicePlus = $("#btn-dice-plus");
-    const btnRollAction = $("#btn-roll-action");
+    // 1. Redesigned Interactive 3D Dice Roller
+    const diceTray = $("#dice-tray");
     const diceResultCard = $("#dice-result-card");
-    const diceResultBreakdown = $("#dice-result-breakdown");
     const diceResultTotal = $("#dice-result-total");
+    const dicePoolNotation = $("#dice-pool-notation");
+    const diceArena = $("#dice-arena");
+    const diceEmptyHint = $("#dice-empty-hint");
+    const diceModeGroup = $("#dice-mode-group");
+    const btnRollAction = $("#btn-roll-action");
+    const btnDiceClear = $("#btn-dice-clear");
 
-    // Tracks dice configuration
-    let currentDiceType = 6;
-    let currentDiceCount = 1;
-    // The dice behind the result on screen, e.g. "2d6" (null before a roll)
-    let rolledDice = null;
+    const MAX_DICE = 20;
+    const VALID_DICE_MODES = ["exact", "best", "worst"];
 
-    const syncDiceStepperButtons = () => {
-      if (btnDiceMinus) btnDiceMinus.disabled = currentDiceCount <= 1;
-      if (btnDicePlus) btnDicePlus.disabled = currentDiceCount >= 20;
+    applyDicePalette();
+
+    // Ensure persisted diceMode is valid
+    if (!VALID_DICE_MODES.includes(state.settings.diceMode)) {
+      state.settings.diceMode = "exact";
+    }
+
+    // In-memory session pool: each die holds rollA and (in best/worst mode) rollB
+    let nextDieId = 1;
+    let dicePool = [];
+    let isRolling = false;
+
+    const rollOne = (sides) => Math.floor(Math.random() * sides) + 1;
+
+    const getCountTier = (count) => {
+      if (count <= 3) return "lg";
+      if (count <= 6) return "md";
+      if (count <= 12) return "sm";
+      return "xs";
     };
-    syncDiceStepperButtons();
 
-    const updateRollButtonLabel = () => {
-      const dice = `${currentDiceCount}d${currentDiceType}`;
-      if (btnRollAction) {
-        btnRollAction.textContent = `Roll ${dice}`;
+    const formatFaceValue = (sides, value) => {
+      if (value == null) return sides === 2 ? "H/T" : `d${sides}`;
+      if (sides === 2) return value === 2 ? "H/2" : "T/1";
+      return String(value);
+    };
+
+    const formatPoolNotation = (pool) => {
+      const counts = new Map();
+      pool.forEach((d) => {
+        counts.set(d.sides, (counts.get(d.sides) || 0) + 1);
+      });
+      return DICE_CATALOG.filter((c) => counts.has(c.sides))
+        .map((c) => `${counts.get(c.sides)}d${c.sides}`)
+        .join(" + ");
+    };
+
+    // Generate stylized 3D faceted SVG polyhedra for each of the 8 die types
+    const createDieSvg = (sides, faceLabel) => {
+      const textLen = String(faceLabel).length;
+      const fontSize =
+        textLen >= 4 ? 13 : textLen === 3 ? 15 : textLen === 2 ? 18 : 21;
+
+      let shapes;
+      let textX = 32;
+      let textY;
+
+      if (sides === 2) {
+        // Beveled 3D coin
+        shapes = `
+          <circle cx="32" cy="34" r="24" class="die-facet-dark" />
+          <circle cx="32" cy="30" r="24" class="die-facet-light" />
+          <circle cx="32" cy="31" r="20" class="die-facet-base" />
+          <circle cx="32" cy="30" r="24" class="die-outline" />
+          <circle cx="32" cy="31" r="19" class="die-facet-seam" />
+        `;
+        textY = 31;
+      } else if (sides === 4) {
+        // 3D faceted tetrahedron
+        shapes = `
+          <polygon points="32,7 57,52 32,57" class="die-facet-dark" />
+          <polygon points="32,7 7,52 32,57" class="die-facet-light" />
+          <polygon points="32,14 51,50 13,50" class="die-facet-base" />
+          <line x1="32" y1="7" x2="32" y2="14" class="die-facet-seam" />
+          <line x1="7" y1="52" x2="13" y2="50" class="die-facet-seam" />
+          <line x1="57" y1="52" x2="51" y2="50" class="die-facet-seam" />
+          <polygon points="32,7 57,52 32,57 7,52" class="die-outline" />
+        `;
+        textY = 39;
+      } else if (sides === 6) {
+        // 3D beveled cube
+        shapes = `
+          <polygon points="11,20 21,10 54,10 45,20" class="die-facet-light" />
+          <polygon points="45,20 54,10 54,45 45,55" class="die-facet-dark" />
+          <rect x="9" y="19" width="37" height="37" rx="5" class="die-facet-base" />
+          <rect x="9" y="19" width="37" height="37" rx="5" class="die-outline" />
+          <polyline points="11,20 21,10 54,10 54,45 45,55" class="die-outline" />
+          <line x1="45" y1="20" x2="54" y2="10" class="die-facet-seam" />
+        `;
+        textX = 27.5;
+        textY = 38;
+      } else if (sides === 8) {
+        // 3D faceted octahedron
+        shapes = `
+          <polygon points="32,5 56,32 32,59 8,32" class="die-facet-dark" />
+          <polygon points="32,5 8,32 32,20" class="die-facet-light" />
+          <polygon points="32,5 56,32 32,20" class="die-facet-light" />
+          <polygon points="32,12 50,41 14,41" class="die-facet-base" />
+          <line x1="32" y1="5" x2="32" y2="12" class="die-facet-seam" />
+          <line x1="8" y1="32" x2="14" y2="41" class="die-facet-seam" />
+          <line x1="56" y1="32" x2="50" y2="41" class="die-facet-seam" />
+          <polygon points="32,5 56,32 32,59 8,32" class="die-outline" />
+        `;
+        textY = 33;
+      } else if (sides === 10) {
+        // 3D faceted kite / pentagonal trapezohedron
+        shapes = `
+          <polygon points="32,5 56,28 50,44 32,59 14,44 8,28" class="die-facet-dark" />
+          <polygon points="32,5 8,28 18,35 32,15" class="die-facet-light" />
+          <polygon points="32,5 56,28 46,35 32,15" class="die-facet-light" />
+          <polygon points="32,12 49,33 32,49 15,33" class="die-facet-base" />
+          <line x1="32" y1="5" x2="32" y2="12" class="die-facet-seam" />
+          <line x1="32" y1="49" x2="32" y2="59" class="die-facet-seam" />
+          <polygon points="32,5 56,28 50,44 32,59 14,44 8,28" class="die-outline" />
+        `;
+        textY = 32;
+      } else if (sides === 12) {
+        // 3D faceted dodecahedron
+        shapes = `
+          <polygon points="32,6 54,18 57,41 42,57 22,57 7,41 10,18" class="die-facet-dark" />
+          <polygon points="32,6 54,18 46,27 18,27 10,18" class="die-facet-light" />
+          <polygon points="32,15 48,27 42,46 22,46 16,27" class="die-facet-base" />
+          <line x1="32" y1="6" x2="32" y2="15" class="die-facet-seam" />
+          <line x1="54" y1="18" x2="48" y2="27" class="die-facet-seam" />
+          <line x1="10" y1="18" x2="16" y2="27" class="die-facet-seam" />
+          <line x1="42" y1="46" x2="42" y2="57" class="die-facet-seam" />
+          <line x1="22" y1="46" x2="22" y2="57" class="die-facet-seam" />
+          <polygon points="32,6 54,18 57,41 42,57 22,57 7,41 10,18" class="die-outline" />
+        `;
+        textY = 33;
+      } else if (sides === 20) {
+        // 3D faceted icosahedron
+        shapes = `
+          <polygon points="32,5 56,19 56,45 32,59 8,45 8,19" class="die-facet-dark" />
+          <polygon points="32,5 56,19 32,16 8,19" class="die-facet-light" />
+          <polygon points="8,19 16,44 8,45" class="die-facet-light" />
+          <polygon points="32,14 50,45 14,45" class="die-facet-base" />
+          <line x1="32" y1="5" x2="32" y2="14" class="die-facet-seam" />
+          <line x1="56" y1="19" x2="50" y2="45" class="die-facet-seam" />
+          <line x1="8" y1="19" x2="14" y2="45" class="die-facet-seam" />
+          <line x1="56" y1="45" x2="50" y2="45" class="die-facet-seam" />
+          <line x1="8" y1="45" x2="14" y2="45" class="die-facet-seam" />
+          <polygon points="32,5 56,19 56,45 32,59 8,45 8,19" class="die-outline" />
+        `;
+        textY = 35;
+      } else {
+        // d100 faceted percentile decagon
+        shapes = `
+          <polygon points="32,5 48,10 58,23 58,41 48,54 32,59 16,54 6,41 6,23 16,10" class="die-facet-dark" />
+          <polygon points="32,5 48,10 58,23 47,25 17,25 6,23 16,10" class="die-facet-light" />
+          <polygon points="32,13 44,18 50,32 44,46 32,51 20,46 14,32 20,18" class="die-facet-base" />
+          <polygon points="32,13 44,18 50,32 44,46 32,51 20,46 14,32 20,18" class="die-facet-seam" />
+          <polygon points="32,5 48,10 58,23 58,41 48,54 32,59 16,54 6,41 6,23 16,10" class="die-outline" />
+        `;
+        textY = 32;
       }
-      // Highlight the result only while it matches the selected dice
-      diceResultCard?.classList.toggle("rolled", rolledDice === dice);
+
+      return `<svg class="die-svg" viewBox="0 0 64 64" aria-hidden="true" focusable="false">${shapes}<text x="${textX}" y="${textY}" font-size="${fontSize}" class="die-face-text">${faceLabel}</text></svg>`;
     };
 
-    if (diceTypeSelector) {
-      const typeButtons = diceTypeSelector.querySelectorAll(".dice-type-btn");
-      typeButtons.forEach((btn) => {
-        btn.addEventListener("click", () => {
-          playHaptic(ImpactStyle.Light);
-          typeButtons.forEach((b) => {
-            const isActive = b === btn;
-            b.classList.toggle("active", isActive);
-            b.setAttribute("aria-pressed", isActive ? "true" : "false");
-          });
-          currentDiceType = parseInt(btn.getAttribute("data-type")) || 6;
-          updateRollButtonLabel();
-          playClickSound(650, 500, 0.05, 0.04);
+    const getPoolSummary = () => {
+      const mode = state.settings.diceMode || "exact";
+      const sumA = dicePool.reduce((acc, d) => acc + d.rollA, 0);
+      if (mode === "exact") {
+        return {
+          mode,
+          isDual: false,
+          sumA,
+          sumB: null,
+          aWins: true,
+          winningSum: sumA,
+          discardedSum: null,
+          winningRolls: dicePool.map((d) => d.rollA),
+        };
+      }
+      const sumB = dicePool.reduce((acc, d) => acc + (d.rollB ?? d.rollA), 0);
+      const aWins = mode === "best" ? sumA >= sumB : sumA <= sumB;
+      return {
+        mode,
+        isDual: true,
+        sumA,
+        sumB,
+        aWins,
+        winningSum: aWins ? sumA : sumB,
+        discardedSum: aWins ? sumB : sumA,
+        winningRolls: dicePool.map((d) => (aWins ? d.rollA : (d.rollB ?? d.rollA))),
+      };
+    };
+
+    const syncModeButtons = () => {
+      if (!diceModeGroup) return;
+      const mode = state.settings.diceMode || "exact";
+      diceModeGroup.querySelectorAll(".dice-mode-btn").forEach((btn) => {
+        const isActive = btn.dataset.diceMode === mode;
+        btn.classList.toggle("active", isActive);
+        btn.setAttribute("aria-checked", isActive ? "true" : "false");
+        btn.tabIndex = isActive ? 0 : -1;
+      });
+    };
+
+    const syncControls = () => {
+      const hasDice = dicePool.length > 0;
+      const atCap = dicePool.length >= MAX_DICE;
+
+      if (diceTray) {
+        diceTray.querySelectorAll(".dice-tray-btn").forEach((btn) => {
+          btn.disabled = atCap || isRolling;
         });
-      });
-    }
+      }
 
-    if (btnDiceMinus) {
-      btnDiceMinus.addEventListener("click", () => {
-        if (currentDiceCount > 1) {
-          playHaptic(ImpactStyle.Light);
-          currentDiceCount--;
-          if (diceCountDisplay) {
-            diceCountDisplay.textContent = currentDiceCount;
-          }
-          syncDiceStepperButtons();
-          updateRollButtonLabel();
-          playClickSound(550, 450, 0.05, 0.04);
+      if (btnRollAction) {
+        btnRollAction.disabled = !hasDice || isRolling;
+      }
+
+      if (btnDiceClear) {
+        btnDiceClear.disabled = !hasDice || isRolling;
+      }
+
+      if (dicePoolNotation) {
+        dicePoolNotation.textContent = hasDice
+          ? formatPoolNotation(dicePool)
+          : "";
+      }
+    };
+
+    const buildRollSetElement = ({
+      setKey,
+      label,
+      sum,
+      values,
+      statusClass,
+      animateIds,
+      showHeader,
+    }) => {
+      const wrapper = document.createElement("div");
+      wrapper.className = `dice-roll-set${statusClass ? ` ${statusClass}` : ""}`;
+      wrapper.dataset.rollSet = setKey;
+
+      if (showHeader) {
+        const header = document.createElement("div");
+        header.className = "dice-roll-set-header";
+        header.innerHTML = `
+          <span class="dice-roll-set-label">${label}</span>
+          <span class="dice-roll-set-sum">${sum}</span>
+        `;
+        wrapper.appendChild(header);
+      }
+
+      const area = document.createElement("div");
+      area.className = "dice-area";
+      area.dataset.countTier = getCountTier(dicePool.length);
+
+      dicePool.forEach((die, idx) => {
+        const val = values[idx];
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "die-chip";
+        if (animateIds && animateIds.has(die.id)) {
+          btn.classList.add("is-tumbling");
         }
+        btn.dataset.dieId = String(die.id);
+        btn.dataset.sides = String(die.sides);
+        const face = formatFaceValue(die.sides, val);
+        btn.setAttribute(
+          "aria-label",
+          `${die.sides === 2 ? `Coin rolled ${face}` : `d${die.sides} rolled ${face}`}, tap to remove`,
+        );
+        btn.innerHTML = createDieSvg(die.sides, face);
+        area.appendChild(btn);
       });
-    }
 
-    if (btnDicePlus) {
-      btnDicePlus.addEventListener("click", () => {
-        if (currentDiceCount < 20) {
-          playHaptic(ImpactStyle.Light);
-          currentDiceCount++;
-          if (diceCountDisplay) {
-            diceCountDisplay.textContent = currentDiceCount;
-          }
-          syncDiceStepperButtons();
-          updateRollButtonLabel();
-          playClickSound(650, 750, 0.05, 0.04);
-        }
-      });
-    }
+      wrapper.appendChild(area);
+      return wrapper;
+    };
 
-    if (
-      btnRollAction &&
-      diceResultTotal &&
-      diceResultBreakdown &&
-      diceShakeIcon &&
-      diceResultCard
-    ) {
-      btnRollAction.addEventListener("click", () => {
-        playHaptic(ImpactStyle.Light);
-        // Trigger shaking animation
-        diceShakeIcon.classList.add("active");
-        btnRollAction.disabled = true;
-        diceResultTotal.textContent = "...";
+    const renderArena = ({
+      animateIdsA = null,
+      animateIdsB = null,
+      popTotal = false,
+    } = {}) => {
+      if (!diceArena || !diceResultTotal || !diceResultCard) return;
+
+      // Clear previous roll sets while preserving the empty hint element
+      diceArena.querySelectorAll(".dice-roll-set").forEach((el) => el.remove());
+
+      if (dicePool.length === 0) {
+        diceArena.classList.remove("is-dual");
+        if (diceEmptyHint) diceEmptyHint.hidden = false;
+        diceResultTotal.textContent = "—";
         diceResultTotal.classList.remove("animate-pop");
-        diceResultBreakdown.textContent = "";
         diceResultCard.classList.remove("rolled");
+        return;
+      }
 
+      if (diceEmptyHint) diceEmptyHint.hidden = true;
+
+      const summary = getPoolSummary();
+      diceArena.classList.toggle("is-dual", summary.isDual);
+
+      if (!summary.isDual) {
+        diceArena.appendChild(
+          buildRollSetElement({
+            setKey: "A",
+            label: "Roll 1",
+            sum: summary.sumA,
+            values: dicePool.map((d) => d.rollA),
+            statusClass: "is-selected",
+            animateIds: animateIdsA,
+            showHeader: false,
+          }),
+        );
+      } else {
+        diceArena.appendChild(
+          buildRollSetElement({
+            setKey: "A",
+            label: "Roll 1",
+            sum: summary.sumA,
+            values: dicePool.map((d) => d.rollA),
+            statusClass: summary.aWins ? "is-selected" : "is-discarded",
+            animateIds: animateIdsA,
+            showHeader: true,
+          }),
+        );
+        diceArena.appendChild(
+          buildRollSetElement({
+            setKey: "B",
+            label: "Roll 2",
+            sum: summary.sumB,
+            values: dicePool.map((d) => d.rollB ?? d.rollA),
+            statusClass: summary.aWins ? "is-discarded" : "is-selected",
+            animateIds: animateIdsB,
+            showHeader: true,
+          }),
+        );
+      }
+
+      diceResultTotal.textContent = String(summary.winningSum);
+      diceResultCard.classList.add("rolled");
+      if (popTotal) {
+        diceResultTotal.classList.remove("animate-pop");
+        void diceResultTotal.offsetWidth;
+        diceResultTotal.classList.add("animate-pop");
+      }
+    };
+
+    const logCurrentRoll = (actionPrefix = "Rolled") => {
+      if (dicePool.length === 0) return;
+      const summary = getPoolSummary();
+      const notation = formatPoolNotation(dicePool);
+      const modeSuffix =
+        summary.mode === "best"
+          ? " (best of two)"
+          : summary.mode === "worst"
+            ? " (worst of two)"
+            : "";
+
+      announce(`${actionPrefix} ${notation}${modeSuffix}: ${summary.winningSum}`);
+
+      let progressionText = `Result: ${summary.winningSum}`;
+      if (summary.winningRolls.length > 1 && summary.winningRolls.length <= 5) {
+        progressionText += ` (${summary.winningRolls.join(" + ")})`;
+      }
+      if (summary.discardedSum != null) {
+        progressionText += ` · vs ${summary.discardedSum}`;
+      }
+      addHistoryLog(
+        { name: "Dice roll", color: "system" },
+        `${actionPrefix} ${notation}${modeSuffix}`,
+        progressionText,
+      );
+    };
+
+    // Populate Top 3D Dice Tray — tapping any die immediately rolls it into the arena
+    if (diceTray) {
+      diceTray.innerHTML = DICE_CATALOG.map(
+        (die) => `
+          <button
+            type="button"
+            class="dice-tray-btn"
+            data-sides="${die.sides}"
+            aria-label="Roll ${die.name}"
+          >
+            <span class="die-svg-wrap">${createDieSvg(die.sides, formatFaceValue(die.sides, null))}</span>
+            <span class="dice-tray-label">${die.label}</span>
+          </button>
+        `,
+      ).join("");
+
+      diceTray.addEventListener("click", (e) => {
+        const btn = e.target.closest(".dice-tray-btn");
+        if (!btn || isRolling || dicePool.length >= MAX_DICE) return;
+
+        const sides = parseInt(btn.dataset.sides, 10) || 6;
+        const mode = state.settings.diceMode || "exact";
+        const newDie = {
+          id: nextDieId++,
+          sides,
+          rollA: rollOne(sides),
+          rollB: mode === "exact" ? null : rollOne(sides),
+        };
+        dicePool.push(newDie);
+
+        const newIds = new Set([newDie.id]);
         playDiceSound();
+        playHaptic(ImpactStyle.Medium);
+        renderArena({
+          animateIdsA: newIds,
+          animateIdsB: mode === "exact" ? null : newIds,
+          popTotal: true,
+        });
+        syncControls();
+        logCurrentRoll("Rolled");
+      });
+    }
+
+    // Tap any die in the arena to remove it from the pool and recalculate
+    if (diceArena) {
+      diceArena.addEventListener("click", (e) => {
+        const chip = e.target.closest(".die-chip");
+        if (!chip || isRolling) return;
+        const id = parseInt(chip.dataset.dieId, 10);
+        dicePool = dicePool.filter((d) => d.id !== id);
+        playHaptic(ImpactStyle.Light);
+        playClickSound(520, 420, 0.05, 0.04);
+        renderArena();
+        syncControls();
+      });
+    }
+
+    // Roll Mode Segmented Control (Exact / Best of two / Worst of two)
+    if (diceModeGroup) {
+      const setDiceMode = (mode, { focus = false } = {}) => {
+        if (!VALID_DICE_MODES.includes(mode)) return;
+        const prevMode = state.settings.diceMode || "exact";
+        if (prevMode === mode) return;
+
+        let animateIdsB = null;
+        if (dicePool.length > 0) {
+          if (mode === "exact") {
+            // Keep the currently selected winning set when collapsing back to exact
+            const summary = getPoolSummary();
+            dicePool = dicePool.map((d) => ({
+              id: d.id,
+              sides: d.sides,
+              rollA: summary.aWins ? d.rollA : (d.rollB ?? d.rollA),
+              rollB: null,
+            }));
+          } else if (prevMode === "exact") {
+            // Roll companion second set immediately so both rolls are visible
+            dicePool = dicePool.map((d) => ({
+              ...d,
+              rollB: rollOne(d.sides),
+            }));
+            animateIdsB = new Set(dicePool.map((d) => d.id));
+            playDiceSound();
+          }
+        }
+
+        state.settings.diceMode = mode;
+        saveSettings();
+        syncModeButtons();
+        renderArena({ animateIdsB, popTotal: dicePool.length > 0 });
+        syncControls();
+        playHaptic(ImpactStyle.Light);
+        playClickSound(620, 520, 0.05, 0.04);
+        if (focus) {
+          diceModeGroup
+            .querySelector(`.dice-mode-btn[data-dice-mode="${mode}"]`)
+            ?.focus();
+        }
+      };
+
+      diceModeGroup.addEventListener("click", (e) => {
+        const btn = e.target.closest(".dice-mode-btn");
+        if (!btn) return;
+        setDiceMode(btn.dataset.diceMode);
+      });
+
+      diceModeGroup.addEventListener("keydown", (e) => {
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+        e.preventDefault();
+        const curIdx = VALID_DICE_MODES.indexOf(
+          state.settings.diceMode || "exact",
+        );
+        const delta = e.key === "ArrowRight" ? 1 : -1;
+        const nextIdx =
+          (curIdx + delta + VALID_DICE_MODES.length) % VALID_DICE_MODES.length;
+        setDiceMode(VALID_DICE_MODES[nextIdx], { focus: true });
+      });
+    }
+
+    // Reroll all dice currently in the arena
+    if (btnRollAction) {
+      btnRollAction.addEventListener("click", () => {
+        if (isRolling || dicePool.length === 0) return;
+
+        isRolling = true;
+        playHaptic(ImpactStyle.Light);
+        playDiceSound();
+        syncControls();
+
+        const prefersReduced = window.matchMedia(
+          "(prefers-reduced-motion: reduce)",
+        ).matches;
+        const delayMs = prefersReduced ? 0 : 240;
 
         setTimeout(() => {
-          diceShakeIcon.classList.remove("active");
+          const mode = state.settings.diceMode || "exact";
+          dicePool = dicePool.map((d) => ({
+            ...d,
+            rollA: rollOne(d.sides),
+            rollB: mode === "exact" ? null : rollOne(d.sides),
+          }));
+          const allIds = new Set(dicePool.map((d) => d.id));
+          isRolling = false;
 
-          let total = 0;
-          const rolls = [];
-          for (let i = 0; i < currentDiceCount; i++) {
-            const roll = Math.floor(Math.random() * currentDiceType) + 1;
-            rolls.push(roll);
-            total += roll;
-          }
+          renderArena({
+            animateIdsA: allIds,
+            animateIdsB: mode === "exact" ? null : allIds,
+            popTotal: true,
+          });
+          syncControls();
+          logCurrentRoll("Rerolled");
 
-          // State 2: Roll Result
-          diceResultTotal.textContent = total;
-          diceResultTotal.classList.add("animate-pop");
-          rolledDice = `${currentDiceCount}d${currentDiceType}`;
-          diceResultCard.classList.add("rolled");
-          announce(`Rolled ${rolledDice}: ${total}`);
-
-          if (currentDiceCount > 1) {
-            diceResultBreakdown.textContent = `(${rolls.join(" + ")})`;
-          } else {
-            diceResultBreakdown.textContent = "";
-          }
-
-          // Log dice roll to history
-          let progressionText = `Result: ${total}`;
-          if (currentDiceCount > 1 && currentDiceCount <= 5) {
-            progressionText += ` (${rolls.join(" + ")})`;
-          }
-          addHistoryLog(
-            { name: "Dice roll", color: "system" },
-            `Rolled ${currentDiceCount}d${currentDiceType}`,
-            progressionText,
-          );
-
-          btnRollAction.disabled = false;
           playClickSound(600, 800, 0.08, 0.05);
           playHaptic(ImpactStyle.Medium);
-        }, 400);
+        }, delayMs);
       });
     }
+
+    // Clear all dice from the arena
+    if (btnDiceClear) {
+      btnDiceClear.addEventListener("click", () => {
+        if (isRolling || dicePool.length === 0) return;
+        dicePool = [];
+        playHaptic(ImpactStyle.Light);
+        playClickSound(460, 360, 0.06, 0.04);
+        renderArena();
+        syncControls();
+      });
+    }
+
+    // Initial render
+    syncModeButtons();
+    renderArena();
+    syncControls();
 
     // 2. Stopwatch & Countdown Timer
     const swStart = $("#btn-timer-placeholder-start");
