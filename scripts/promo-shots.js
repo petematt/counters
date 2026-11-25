@@ -247,8 +247,9 @@ const SHOTS = {
     async setup(app) {
       await app.tap(tab('dice'));
       await app.wait(600);
-      await app.tap('#btn-dice-plus');
-      await app.tap('#btn-dice-plus');
+      await app.tap('.dice-tray-btn[data-sides="6"]');
+      await app.tap('.dice-tray-btn[data-sides="6"]');
+      await app.tap('.dice-tray-btn[data-sides="6"]');
       await app.wait(200);
       app.random(31); // 5 + 6 + 5
       await app.tap('#btn-roll-action');
@@ -257,9 +258,9 @@ const SHOTS = {
     seconds: 4,
     async clip(app) {
       await app.wait(400);
-      await app.tap('.dice-type-btn[data-type="20"]');
+      await app.tap('.dice-tray-btn[data-sides="20"]');
       await app.wait(500);
-      app.random(36); // 20 + 19 + 6
+      app.random(36);
       await app.tap('#btn-roll-action');
       await app.wait(2500);
     },
