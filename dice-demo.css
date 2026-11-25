@@ -401,6 +401,11 @@ body.dice-demo-body {
   filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.28));
 }
 
+/* Picker shapes (matches Picker tab's soft colored glow) */
+.dice-style-picker-match .die-svg {
+  filter: drop-shadow(0 3px 9px var(--die-glow, rgba(56, 189, 248, 0.42)));
+}
+
 /* 2. Matte clay (soft rounded claymorphic pillowy shading) */
 .dice-style-matte-clay .die-svg {
   filter: drop-shadow(0 5px 7px rgba(0, 0, 0, 0.24));

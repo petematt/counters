@@ -48,6 +48,11 @@ const DICE_STYLES = [
     desc: "Clean Swiss geometric silhouettes matching Counters' minimalist cards with zero visual clutter.",
   },
   {
+    id: "picker-match",
+    name: "Picker shapes",
+    desc: "Matches the Picker tab's visual language: bold rounded colored strokes, 28% translucent fills, and a soft colored glow.",
+  },
+  {
     id: "faceted-gem",
     name: "Faceted gem",
     desc: "Unified top-down orthographic polyhedra with lit top-left bevels, shaded lower planes, and inner seams.",
@@ -363,6 +368,16 @@ const renderStyledDieSvg = (styleId, sides, value, hex) => {
       ty = 32;
     }
     return `<svg class="die-svg" viewBox="0 0 64 64" aria-hidden="true">${shapes}${renderText(tx, ty, fontSize, solidInk)}</svg>`;
+  }
+
+  // Style: Picker shapes (matches Picker tab's bold rounded stroke, 28% fill, and colored glow)
+  if (styleId === "picker-match") {
+    const fillCol = hexToRgba(hex, 0.28);
+    const body = withAttrs(
+      g.outer,
+      `fill="${fillCol}" stroke="${hex}" stroke-width="3.8" stroke-linejoin="round" stroke-linecap="round"`,
+    );
+    return `<svg class="die-svg" style="--die-glow: ${hexToRgba(hex, 0.42)}" viewBox="0 0 64 64" aria-hidden="true">${body}${renderText(g.textX, g.textY, fontSize, tintInk)}</svg>`;
   }
 
   // Style 1: Faceted gem (unified top-down orthographic perspective across all 8 dice)
