@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en" class="dark-mode">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Dice styles — Counters</title>
+    <link rel="icon" type="image/png" href="./favicon.png" />
+    <meta name="theme-color" content="#0d0e11" />
+    <link rel="stylesheet" href="./index.css" />
+    <link rel="stylesheet" href="./debug.css" />
+    <link rel="stylesheet" href="./dice-demo.css" />
+  </head>
+
+  <body class="debug-body dice-demo-body">
+    <div id="ambient-backdrop" class="ambient-backdrop" aria-hidden="true"></div>
+
+    <div class="studio-shell">
+      <header class="studio-topbar">
+        <div class="topbar-brand">
+          <a href="./" class="secondary-btn lab-back-btn">← Counters</a>
+          <div class="brand-heading">
+            <h1 class="studio-title">Dice styles</h1>
+          </div>
+        </div>
+
+        <div class="topbar-controls">
+          <div class="control-cluster" role="group" aria-label="Face display">
+            <span class="cluster-label">Faces</span>
+            <div class="segmented-control" id="face-mode-group">
+              <button
+                type="button"
+                class="segment-btn active"
+                data-face-mode="rolled"
+                aria-pressed="true"
+              >
+                Rolled
+              </button>
+              <button
+                type="button"
+                class="segment-btn"
+                data-face-mode="labels"
+                aria-pressed="false"
+              >
+                Labels
+              </button>
+            </div>
+          </div>
+
+          <div class="control-cluster" role="group" aria-label="Appearance">
+            <div class="segmented-control" id="theme-mode-group">
+              <button
+                type="button"
+                class="segment-btn active"
+                data-theme-mode="dark"
+                aria-pressed="true"
+              >
+                Dark
+              </button>
+              <button
+                type="button"
+                class="segment-btn"
+                data-theme-mode="light"
+                aria-pressed="false"
+              >
+                Light
+              </button>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            class="primary-btn lab-compact-btn"
+            id="btn-roll-all-samples"
+          >
+            Roll all
+          </button>
+        </div>
+      </header>
+
+      <main class="dice-demo-workspace">
+        <!-- Left column: Palette & theme selector matching debug.html -->
+        <aside class="catalog-column dice-demo-sidebar" aria-label="Theme and palette selector">
+          <div class="settings-section catalog-panel">
+            <div class="catalog-header">
+              <div class="dice-demo-panel-title">Palette (8 colors → 8 dice)</div>
+              <div class="dice-slot-strip" id="dice-slot-strip" aria-label="Active palette slots"></div>
+            </div>
+
+            <div
+              class="palette-picker-grid palette-catalog-scroll"
+              id="palette-catalog-grid"
+              role="radiogroup"
+              aria-label="Palettes"
+            ></div>
+
+            <div class="dynamic-dock">
+              <div class="hue-row">
+                <div class="hue-row-top">
+                  <label for="demo-theme-hue" class="setting-title">
+                    Theme color
+                    <span class="dock-sub" id="theme-hue-readout">205°</span>
+                  </label>
+                  <span class="setting-desc">Drives accents &amp; buttons</span>
+                </div>
+                <input
+                  type="range"
+                  id="demo-theme-hue"
+                  class="hue-slider"
+                  min="0"
+                  max="360"
+                  value="205"
+                  aria-label="Theme color hue"
+                />
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <!-- Center column: Dice style cards -->
+        <section class="dice-styles-column" aria-label="Dice visual styles">
+          <div class="dice-styles-intro">
+            <p class="dice-styles-subtitle">
+              Compare the current, proposed, and exploratory dice styles across all 8 dice. Click any card to preview it in the app frame, or tap any die to roll it.
+            </p>
+          </div>
+          <div class="dice-styles-grid" id="dice-styles-grid"></div>
+        </section>
+
+        <!-- Right column: Live Counters app phone context preview -->
+        <aside class="dice-preview-column" aria-label="In-app preview">
+          <div class="settings-section dice-preview-shell">
+            <div class="dice-preview-meta">
+              <div>
+                <div class="dice-demo-panel-title">App context preview</div>
+                <div class="dice-preview-active-name" id="preview-style-name">
+                  Current implementation
+                </div>
+              </div>
+              <button
+                type="button"
+                class="secondary-btn dice-preview-copy-btn"
+                id="btn-copy-link"
+              >
+                Copy link
+              </button>
+            </div>
+
+            <div class="phone-frame" id="phone-frame">
+              <div class="phone-header">
+                <span class="phone-title">Dice</span>
+                <div class="phone-header-dots" aria-hidden="true">
+                  <span></span><span></span><span></span>
+                </div>
+              </div>
+
+              <div class="phone-dice-body">
+                <div class="dice-workspace phone-dice-workspace" id="preview-workspace">
+                  <div
+                    class="dice-tray"
+                    id="preview-dice-tray"
+                    role="group"
+                    aria-label="Preview dice tray"
+                  ></div>
+
+                  <div class="dice-zone dice-result-card" id="preview-result-card">
+                    <div class="dice-arena-header">
+                      <div class="dice-total-wrap">
+                        <span class="dice-total-label">Total</span>
+                        <span class="dice-result-total" id="preview-result-total">—</span>
+                      </div>
+                      <span class="dice-zone-count" id="preview-pool-notation"></span>
+                    </div>
+                    <div class="dice-arena" id="preview-dice-arena">
+                      <p class="dice-empty-hint" id="preview-empty-hint">
+                        Tap a die to roll it
+                      </p>
+                    </div>
+                  </div>
+
+                  <div
+                    class="dice-mode-group"
+                    id="preview-mode-group"
+                    role="radiogroup"
+                    aria-label="Preview roll mode"
+                  >
+                    <button
+                      type="button"
+                      class="dice-mode-btn active"
+                      data-dice-mode="exact"
+                      role="radio"
+                      aria-checked="true"
+                    >
+                      Exact
+                    </button>
+                    <button
+                      type="button"
+                      class="dice-mode-btn"
+                      data-dice-mode="best"
+                      role="radio"
+                      aria-checked="false"
+                    >
+                      Best of two
+                    </button>
+                    <button
+                      type="button"
+                      class="dice-mode-btn"
+                      data-dice-mode="worst"
+                      role="radio"
+                      aria-checked="false"
+                    >
+                      Worst of two
+                    </button>
+                  </div>
+
+                  <div class="dice-actions-bar">
+                    <button
+                      type="button"
+                      class="primary-btn dice-roll-action-btn"
+                      id="preview-btn-reroll"
+                    >
+                      Reroll
+                    </button>
+                    <button
+                      type="button"
+                      class="dice-secondary-btn"
+                      id="preview-btn-clear"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <nav class="phone-bottom-nav" aria-hidden="true">
+                <span class="phone-nav-item">Counters</span>
+                <span class="phone-nav-item active">Dice</span>
+                <span class="phone-nav-item">Timer</span>
+                <span class="phone-nav-item">Picker</span>
+              </nav>
+            </div>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <div class="studio-toast" id="studio-toast" role="status" aria-live="polite" hidden></div>
+
+    <script type="module" src="./dice-demo.js"></script>
+  </body>
+</html>
