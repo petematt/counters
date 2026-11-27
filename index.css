@@ -1361,44 +1361,19 @@ html[data-layout="grid"] .card-direct-zone-plus {
   }
 }
 
-/* --- 3D Faceted SVG Dice Styling --- */
+/* --- Minimalist Flat SVG Dice Styling --- */
 .die-svg {
   width: 100%;
   height: 100%;
   display: block;
   overflow: visible;
-  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.28));
-}
-
-.light-mode .die-svg {
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.18));
 }
 
 .die-facet-base {
   fill: var(--die-base);
-}
-
-.die-facet-light {
-  fill: var(--die-light);
-}
-
-.die-facet-dark {
-  fill: var(--die-dark);
-}
-
-.die-outline {
-  fill: none;
   stroke: var(--die-edge);
-  stroke-width: 2;
+  stroke-width: 1.5;
   stroke-linejoin: round;
-}
-
-.die-facet-seam {
-  fill: none;
-  stroke: var(--die-edge);
-  stroke-width: 1.25;
-  stroke-linejoin: round;
-  opacity: 0.55;
 }
 
 .die-face-text {
@@ -1414,59 +1389,43 @@ html[data-layout="grid"] .card-direct-zone-plus {
 /* Map each die type to its palette-derived CSS tokens */
 [data-sides="2"] {
   --die-base: var(--die-c-2, #38bdf8);
-  --die-light: var(--die-c-2-light, #7dd3fc);
-  --die-dark: var(--die-c-2-dark, #0284c7);
   --die-ink: var(--die-c-2-ink, #000000);
-  --die-edge: var(--die-c-2-edge, rgba(0, 0, 0, 0.28));
+  --die-edge: var(--die-c-2-edge, rgba(0, 0, 0, 0.18));
 }
 [data-sides="4"] {
   --die-base: var(--die-c-4, #f87171);
-  --die-light: var(--die-c-4-light, #fca5a5);
-  --die-dark: var(--die-c-4-dark, #dc2626);
   --die-ink: var(--die-c-4-ink, #000000);
-  --die-edge: var(--die-c-4-edge, rgba(0, 0, 0, 0.28));
+  --die-edge: var(--die-c-4-edge, rgba(0, 0, 0, 0.18));
 }
 [data-sides="6"] {
   --die-base: var(--die-c-6, #4ade80);
-  --die-light: var(--die-c-6-light, #86efac);
-  --die-dark: var(--die-c-6-dark, #16a34a);
   --die-ink: var(--die-c-6-ink, #000000);
-  --die-edge: var(--die-c-6-edge, rgba(0, 0, 0, 0.28));
+  --die-edge: var(--die-c-6-edge, rgba(0, 0, 0, 0.18));
 }
 [data-sides="8"] {
   --die-base: var(--die-c-8, #fb923c);
-  --die-light: var(--die-c-8-light, #fdba74);
-  --die-dark: var(--die-c-8-dark, #ea580c);
   --die-ink: var(--die-c-8-ink, #000000);
-  --die-edge: var(--die-c-8-edge, rgba(0, 0, 0, 0.28));
+  --die-edge: var(--die-c-8-edge, rgba(0, 0, 0, 0.18));
 }
 [data-sides="10"] {
   --die-base: var(--die-c-10, #c084fc);
-  --die-light: var(--die-c-10-light, #d8b4fe);
-  --die-dark: var(--die-c-10-dark, #9333ea);
   --die-ink: var(--die-c-10-ink, #000000);
-  --die-edge: var(--die-c-10-edge, rgba(0, 0, 0, 0.28));
+  --die-edge: var(--die-c-10-edge, rgba(0, 0, 0, 0.18));
 }
 [data-sides="12"] {
   --die-base: var(--die-c-12, #f472b6);
-  --die-light: var(--die-c-12-light, #f9a8d4);
-  --die-dark: var(--die-c-12-dark, #db2777);
   --die-ink: var(--die-c-12-ink, #000000);
-  --die-edge: var(--die-c-12-edge, rgba(0, 0, 0, 0.28));
+  --die-edge: var(--die-c-12-edge, rgba(0, 0, 0, 0.18));
 }
 [data-sides="20"] {
   --die-base: var(--die-c-20, #facc15);
-  --die-light: var(--die-c-20-light, #fde047);
-  --die-dark: var(--die-c-20-dark, #ca8a04);
   --die-ink: var(--die-c-20-ink, #000000);
-  --die-edge: var(--die-c-20-edge, rgba(0, 0, 0, 0.28));
+  --die-edge: var(--die-c-20-edge, rgba(0, 0, 0, 0.18));
 }
 [data-sides="100"] {
   --die-base: var(--die-c-100, #2dd4bf);
-  --die-light: var(--die-c-100-light, #5eead4);
-  --die-dark: var(--die-c-100-dark, #0d9488);
   --die-ink: var(--die-c-100-ink, #000000);
-  --die-edge: var(--die-c-100-edge, rgba(0, 0, 0, 0.28));
+  --die-edge: var(--die-c-100-edge, rgba(0, 0, 0, 0.18));
 }
 
 /* --- Roll Mode Segmented Toggle --- */
